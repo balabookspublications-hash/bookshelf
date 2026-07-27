@@ -11,7 +11,7 @@ export const siteConfig = {
   spineMark: "CS",
   bookLinkLabel: "View book",
   socialImageAlt:
-    "An editorial shelf of colorful, abstract hardcover books.",
+    "The Complete Shelf, with tactile abstract hardcovers and one book pulled forward on a walnut shelf.",
   independentNote:
     "Independent open-source project. Not affiliated with or endorsed by Stripe.",
 } as const;

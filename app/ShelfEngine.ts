@@ -27,6 +27,10 @@ import {
   stripeAssetUrl,
   type StripeBookAsset,
 } from "./stripe-assets";
+import {
+  addStripeFoilBlend,
+  stripeFoilSettings,
+} from "./stripe-foil";
 
 export type ShelfMode = "browse" | "focusing" | "inspect" | "returning";
 
@@ -1260,6 +1264,7 @@ export class ShelfEngine {
         throw new Error(`Missing cover texture for ${bookAsset.slug}`);
       }
 
+      const foilSettings = stripeFoilSettings(bookAsset.material);
       const material = new THREE.MeshPhysicalMaterial({
         name: `stripePressMaterial:${bookAsset.slug}`,
         map: diffuse,
@@ -1271,6 +1276,25 @@ export class ShelfEngine {
         clearcoat: 0.12,
         clearcoatRoughness: 0.55,
       });
+      if (foil && foilSettings.enabled) {
+        material.onBeforeCompile = (shader) => {
+          shader.uniforms.stripeFoilMap = { value: foil };
+          shader.uniforms.stripeFoilOpacity = {
+            value: foilSettings.opacity,
+          };
+          shader.uniforms.stripeFoilDetail = {
+            value: foilSettings.detail,
+          };
+          shader.fragmentShader = addStripeFoilBlend(
+            shader.fragmentShader,
+          );
+        };
+        material.customProgramCacheKey = () => "stripe-colored-foil-v1";
+        material.userData.stripeFoil = {
+          opacity: foilSettings.opacity,
+          detail: foilSettings.detail,
+        };
+      }
       const mesh = new THREE.Mesh(this.stripeGeometry, material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;

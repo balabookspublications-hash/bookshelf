@@ -66,7 +66,10 @@ test("server-renders the complete editorial bookshelf shell", async () => {
   assert.ok(renderedPositions.every((position) => position >= 0));
   assert.deepEqual(renderedPositions, [...renderedPositions].sort((a, b) => a - b));
   assert.match(html, /og:image/);
-  assert.match(html, /\/og\.png/);
+  assert.match(html, /\/social-card\.webp/);
+  assert.match(html, /summary_large_image/);
+  assert.match(html, /1200/);
+  assert.match(html, /630/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton/);
 });
 
@@ -100,6 +103,7 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.match(engine, /OBJLoader/);
   assert.match(engine, /loadStripeAssets/);
   assert.match(engine, /MeshPhysicalMaterial/);
+  assert.match(engine, /addStripeFoilBlend/);
   assert.match(engine, /stripeBookCoverFacingRotationY = -Math\.PI \/ 2/);
   assert.match(
     engine,
@@ -135,6 +139,38 @@ test("keeps third-party editions optional and supports owned cover art", async (
   );
   assert.doesNotMatch(engine, /sourceBounds.*setFromObject\(root\)/s);
   assert.doesNotMatch(engine, /GLTFLoader|loadMintAssets/);
+});
+
+test("restores colored foil artwork from edition coverage maps", async () => {
+  const { addStripeFoilBlend, stripeFoilSettings } = await import(
+    "../app/stripe-foil.ts"
+  );
+  const shader = addStripeFoilBlend(`
+    #include <map_pars_fragment>
+    void main() {
+      vec4 diffuseColor = vec4(1.0);
+      vec3 normal = vec3(0.0, 0.0, 1.0);
+      #include <normal_fragment_maps>
+    }
+  `);
+
+  assert.match(shader, /uniform sampler2D stripeFoilMap/);
+  assert.match(shader, /texture2D\(stripeFoilMap, vMapUv\)/);
+  assert.match(shader, /texture2D\(map, stripeFoilIndex\)/);
+  assert.match(shader, /diffuseColor\.rgb = mix/);
+  const normalMapsIndex = shader.indexOf("#include <normal_fragment_maps>");
+  const foilCoverageIndex = shader.indexOf("float stripeFoilCoverage");
+  assert.ok(normalMapsIndex >= 0);
+  assert.ok(foilCoverageIndex > normalMapsIndex);
+
+  assert.deepEqual(
+    stripeFoilSettings({ foilOpacity: 1.5, foilDetail: 3 }),
+    { enabled: true, opacity: 1.5, detail: 3 },
+  );
+  assert.deepEqual(
+    stripeFoilSettings({ foilOpacity: -1, foilDetail: 0 }),
+    { enabled: false, opacity: 0, detail: 0.1 },
+  );
 });
 
 test("keeps every book footprint separated throughout browse and focus routes", async () => {

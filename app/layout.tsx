@@ -27,12 +27,14 @@ export async function generateMetadata(): Promise<Metadata> {
       title,
       description,
       type: "website",
+      siteName: siteConfig.applicationName,
       images: [
         {
-          url: `${origin}/og.png`,
-          width: 1536,
-          height: 1024,
+          url: `${origin}/social-card.webp`,
+          width: 1200,
+          height: 630,
           alt: siteConfig.socialImageAlt,
+          type: "image/webp",
         },
       ],
     },
@@ -40,7 +42,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title,
       description,
-      images: [`${origin}/og.png`],
+      images: [`${origin}/social-card.webp`],
     },
   };
 }
