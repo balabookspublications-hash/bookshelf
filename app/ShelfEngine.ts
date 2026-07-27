@@ -1,15 +1,32 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import type { CatalogBook } from "./catalog";
+import {
+  bookFootprintsOverlap,
+  browseMotionPose,
+  browsePhaseDuration,
+  createMotionLayout,
+  focusedBookPose,
+  presentedBookPose,
+  shelvedBookPose,
+  type BookFootprint,
+  type BookPose,
+  type BrowseMotionPhase,
+  type MotionLayout,
+} from "./book-motion";
 import {
   createBackCover,
   createFrontCover,
   createSpineCover,
   createTitleDecal,
 } from "./cover-art";
-import type { MintAssetManifest, MintBookAsset } from "./mint-assets";
+import {
+  STRIPE_ASSET_ROOT,
+  stripeAssetUrl,
+  type StripeBookAsset,
+} from "./stripe-assets";
 
 export type ShelfMode = "browse" | "focusing" | "inspect" | "returning";
 
@@ -27,10 +44,16 @@ type RuntimeBook = {
   content: THREE.Group;
   physical: THREE.Group;
   assetHolder: THREE.Group;
+  frontSurface: THREE.Mesh<
+    THREE.PlaneGeometry,
+    THREE.MeshPhysicalMaterial
+  >;
   titleDecal: THREE.Mesh;
   pickProxy: THREE.Mesh;
   livingMaterial?: THREE.ShaderMaterial;
   x: number;
+  width: number;
+  pose: BookPose;
   hover: number;
   targetHover: number;
   textures: THREE.Texture[];
@@ -42,14 +65,30 @@ const browseTarget = new THREE.Vector3(0, 1.28, 0.15);
 const pageColor = new THREE.Color("#e9dfca");
 const shelfColor = new THREE.Color("#5a4132");
 const clamp = THREE.MathUtils.clamp;
+const focusInDuration = 0.46;
+const focusOutDuration = 0.34;
+const desktopDetailWidthRatio = 0.41;
+const compactDetailWidthRatio = 0.48;
+const desktopDetailMaxWidth = 620;
+const compactDetailMaxWidth = 570;
+const desktopFocusX = -0.58;
+const desktopFocusZ = 1.66;
+const desktopFocusScale = 1.08;
+const mobileFocusZ = 1.4;
+const mobileFocusScale = 0.92;
+
+// Downloaded Stripe OBJ basis: X = thickness, Y = up/height, Z = width,
+// and the front cover is on +X. Rotating -90° maps that cover to world +Z,
+// toward the browse camera.
+const stripeBookCoverFacingRotationY = -Math.PI / 2;
 
 function damp(current: number, target: number, lambda: number, delta: number) {
   return THREE.MathUtils.damp(current, target, lambda, delta);
 }
 
-function ease(value: number) {
-  const t = clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
+function easeOutCubic(value: number) {
+  const t = 1 - clamp(value, 0, 1);
+  return 1 - t * t * t;
 }
 
 function toTexture(
@@ -121,6 +160,14 @@ export class ShelfEngine {
   private mode: ShelfMode = "browse";
   private selectedIndex: number | null = null;
   private activeIndex = 0;
+  private presentedIndex: number | null = 0;
+  private pendingFocusIndex: number | null = null;
+  private browseMotionPhase: BrowseMotionPhase | "idle" = "idle";
+  private browseMotionProgress = 0;
+  private motionBookIndex: number | null = null;
+  private motionLayout: MotionLayout = createMotionLayout([]);
+  private collisionRejects = 0;
+  private lastCollisionPair: [string, string] | null = null;
   private scrollIndex = 0;
   private targetScrollIndex = 0;
   private focusProgress = 0;
@@ -133,6 +180,13 @@ export class ShelfEngine {
   private reducedMotion = false;
   private assetCount = 0;
   private assetFailures = 0;
+  private stripeTextureCache = new Map<
+    string,
+    Promise<THREE.Texture | null>
+  >();
+  private stripeTextures = new Set<THREE.Texture>();
+  private stripeGeometry: THREE.BufferGeometry | null = null;
+  private stripeGeometrySize = new THREE.Vector3();
   private focusCameraPosition = new THREE.Vector3();
   private focusCameraTarget = new THREE.Vector3();
   private responsiveBrowseCamera = browseCamera.clone();
@@ -187,7 +241,7 @@ export class ShelfEngine {
     this.handleResize();
     this.callbacks.onReady();
     this.animate();
-    void this.loadMintAssets();
+    void this.loadStripeAssets();
 
     (
       window as unknown as {
@@ -275,7 +329,26 @@ export class ShelfEngine {
       const runtime = this.createBook(book, index, cursor);
       this.runtimeBooks.push(runtime);
       this.shelfGroup.add(runtime.slot);
+      if (book.coverImage) {
+        void this.loadCustomCover(runtime, book.coverImage);
+      }
       cursor += book.thickness * 0.5 + gap;
+    });
+
+    this.motionLayout = createMotionLayout(
+      this.runtimeBooks.map((book) => ({
+        width: book.width,
+        thickness: book.data.thickness,
+      })),
+    );
+    this.runtimeBooks.forEach((book, index) => {
+      this.commitBookPose(
+        book,
+        index === 0
+          ? presentedBookPose(this.motionLayout)
+          : shelvedBookPose(this.motionLayout),
+        false,
+      );
     });
 
     const shelfWidth = cursor + 8;
@@ -316,13 +389,17 @@ export class ShelfEngine {
     const content = new THREE.Group();
     content.name = `bookPresentation:${book.id}`;
     slot.add(content);
+    const pose = shelvedBookPose(this.motionLayout);
+    content.position.set(pose.x, 0, pose.z);
+    content.rotation.y = pose.yaw;
+    content.scale.setScalar(pose.scale);
 
     const physical = new THREE.Group();
     physical.name = `proceduralBook:${book.id}`;
     content.add(physical);
 
     const assetHolder = new THREE.Group();
-    assetHolder.name = `mintBook:${book.id}`;
+    assetHolder.name = `stripePressBook:${book.id}`;
     content.add(assetHolder);
 
     const boardMaterial = new THREE.MeshPhysicalMaterial({
@@ -406,7 +483,10 @@ export class ShelfEngine {
     const backTexture = toTexture(createBackCover(book), this.renderer);
     const textures = [frontTexture, titleTexture, spineTexture, backTexture];
 
-    const frontSurface = new THREE.Mesh(
+    const frontSurface = new THREE.Mesh<
+      THREE.PlaneGeometry,
+      THREE.MeshPhysicalMaterial
+    >(
       new THREE.PlaneGeometry(width - 0.065, book.height - 0.065),
       new THREE.MeshPhysicalMaterial({
         map: frontTexture,
@@ -493,10 +573,13 @@ export class ShelfEngine {
       content,
       physical,
       assetHolder,
+      frontSurface,
       titleDecal,
       pickProxy,
       livingMaterial,
       x,
+      width,
+      pose,
       hover: 0,
       targetHover: 0,
       textures,
@@ -517,6 +600,7 @@ export class ShelfEngine {
   private handleWheel = (event: WheelEvent) => {
     if (this.mode !== "browse") return;
     event.preventDefault();
+    this.pendingFocusIndex = null;
     const dominant =
       Math.abs(event.deltaX) > Math.abs(event.deltaY)
         ? event.deltaX
@@ -544,6 +628,7 @@ export class ShelfEngine {
     if (this.mode !== "browse") return;
 
     if (this.pointerDown && event.pointerId === this.pointerId) {
+      this.pendingFocusIndex = null;
       const delta = event.clientX - this.pointerLastX;
       this.pointerLastX = event.clientX;
       this.pointerTravel += Math.abs(delta);
@@ -660,6 +745,149 @@ export class ShelfEngine {
     );
   }
 
+  private footprintFor(
+    book: RuntimeBook,
+    pose: BookPose = book.pose,
+  ): BookFootprint {
+    return {
+      id: book.data.id,
+      x: book.x + pose.x,
+      z: book.slot.position.z + pose.z,
+      yaw: pose.yaw,
+      scale: pose.scale,
+      width: book.width,
+      thickness: book.data.thickness,
+    };
+  }
+
+  private collisionFor(book: RuntimeBook, pose: BookPose) {
+    const proposed = this.footprintFor(book, pose);
+    return (
+      this.runtimeBooks.find(
+        (other) =>
+          other !== book &&
+          bookFootprintsOverlap(
+            proposed,
+            this.footprintFor(other),
+            this.motionLayout.collisionMargin,
+          ),
+      ) ?? null
+    );
+  }
+
+  private commitBookPose(
+    book: RuntimeBook,
+    pose: BookPose,
+    guardCollision = true,
+  ) {
+    if (guardCollision) {
+      const collidedWith = this.collisionFor(book, pose);
+      if (collidedWith) {
+        this.collisionRejects += 1;
+        this.lastCollisionPair = [book.data.id, collidedWith.data.id];
+        return false;
+      }
+    }
+
+    book.pose = { ...pose };
+    book.content.position.x = pose.x;
+    book.content.position.z = pose.z;
+    book.content.rotation.y = pose.yaw;
+    book.content.scale.setScalar(pose.scale);
+    return true;
+  }
+
+  private beginFocus(index: number) {
+    if (
+      this.mode !== "browse" ||
+      this.browseMotionPhase !== "idle" ||
+      this.presentedIndex !== index
+    ) {
+      return;
+    }
+    this.pendingFocusIndex = null;
+    this.selectedIndex = index;
+    this.focusProgress = 0;
+    this.mode = "focusing";
+    this.runtimeBooks.forEach((book) => {
+      book.targetHover = 0;
+    });
+    this.callbacks.onMode(this.mode, index);
+    this.callbacks.onStatus(
+      `Opening ${this.runtimeBooks[index].data.shortTitle}`,
+    );
+  }
+
+  private updateBrowseMotion(delta: number) {
+    if (this.browseMotionPhase === "idle") {
+      if (this.presentedIndex === this.activeIndex) {
+        if (this.pendingFocusIndex === this.activeIndex) {
+          this.beginFocus(this.activeIndex);
+        }
+        return;
+      }
+
+      this.motionBookIndex = this.presentedIndex;
+      this.browseMotionPhase =
+        this.motionBookIndex === null ? "extract-next" : "retreat-current";
+      if (this.motionBookIndex === null) {
+        this.motionBookIndex = this.activeIndex;
+      }
+      this.browseMotionProgress = 0;
+    }
+
+    const phase = this.browseMotionPhase;
+    const motionIndex = this.motionBookIndex;
+    if (motionIndex === null) return;
+    const duration = this.reducedMotion
+      ? Math.max(0.055, browsePhaseDuration[phase] * 0.45)
+      : browsePhaseDuration[phase];
+    const nextProgress = clamp(
+      this.browseMotionProgress + delta / duration,
+      0,
+      1,
+    );
+    const movingBook = this.runtimeBooks[motionIndex];
+    const proposedPose = browseMotionPose(
+      phase,
+      nextProgress,
+      this.motionLayout,
+    );
+    if (!this.commitBookPose(movingBook, proposedPose)) return;
+
+    this.browseMotionProgress = nextProgress;
+    if (nextProgress < 1) return;
+
+    this.browseMotionProgress = 0;
+    switch (phase) {
+      case "retreat-current":
+        this.browseMotionPhase = "turn-current";
+        break;
+      case "turn-current":
+        this.browseMotionPhase = "shelve-current";
+        break;
+      case "shelve-current":
+        this.presentedIndex = null;
+        this.motionBookIndex = this.activeIndex;
+        this.browseMotionPhase = "extract-next";
+        break;
+      case "extract-next":
+        this.browseMotionPhase = "turn-next";
+        break;
+      case "turn-next":
+        this.browseMotionPhase = "settle-next";
+        break;
+      case "settle-next":
+        this.presentedIndex = motionIndex;
+        this.motionBookIndex = null;
+        this.browseMotionPhase = "idle";
+        if (this.pendingFocusIndex === this.presentedIndex) {
+          this.beginFocus(this.presentedIndex);
+        }
+        break;
+    }
+  }
+
   private animate = () => {
     if (this.isDisposed) return;
     this.animationFrame = requestAnimationFrame(this.animate);
@@ -679,8 +907,17 @@ export class ShelfEngine {
       this.canvas.dataset.triangles = String(diagnostics.triangles);
       this.canvas.dataset.geometries = String(diagnostics.geometries);
       this.canvas.dataset.textures = String(diagnostics.textures);
-      this.canvas.dataset.mintAssets = String(diagnostics.mintAssetsLoaded);
+      this.canvas.dataset.stripeAssets = String(
+        diagnostics.stripeAssetsLoaded,
+      );
       this.canvas.dataset.pixelRatio = String(diagnostics.pixelRatio);
+      this.canvas.dataset.motionPhase = diagnostics.motionPhase;
+      this.canvas.dataset.collisionFree = String(
+        diagnostics.currentCollision === null,
+      );
+      this.canvas.dataset.collisionRejects = String(
+        diagnostics.collisionRejects,
+      );
       this.lastDiagnosticsAt = timestamp;
     }
   };
@@ -708,15 +945,14 @@ export class ShelfEngine {
       );
       this.camera.lookAt(browseTarget);
     } else if (this.mode === "focusing") {
-      this.focusProgress = damp(
-        this.focusProgress,
+      this.focusProgress = clamp(
+        this.focusProgress +
+          delta / (this.reducedMotion ? 0.08 : focusInDuration),
+        0,
         1,
-        this.reducedMotion ? 18 : 5.4,
-        delta,
       );
       this.updateFocusCamera(delta);
-      if (this.focusProgress > 0.985) {
-        this.focusProgress = 1;
+      if (this.focusProgress >= 1) {
         this.mode = "inspect";
         this.controls.enabled = true;
         this.controls.target.copy(this.focusCameraTarget);
@@ -729,26 +965,32 @@ export class ShelfEngine {
       }
     } else if (this.mode === "returning") {
       this.controls.enabled = false;
-      this.focusProgress = damp(
-        this.focusProgress,
+      this.focusProgress = clamp(
+        this.focusProgress -
+          delta / (this.reducedMotion ? 0.08 : focusOutDuration),
         0,
-        this.reducedMotion ? 20 : 6.4,
-        delta,
+        1,
       );
       this.camera.position.lerp(
         this.responsiveBrowseCamera,
-        1 - Math.exp(-(this.reducedMotion ? 18 : 7.2) * delta),
+        1 - Math.exp(-(this.reducedMotion ? 24 : 14) * delta),
       );
       this.camera.lookAt(browseTarget);
-      if (this.focusProgress < 0.012) {
-        this.focusProgress = 0;
+      if (this.focusProgress <= 0) {
+        if (this.selectedIndex !== null) {
+          this.commitBookPose(
+            this.runtimeBooks[this.selectedIndex],
+            presentedBookPose(this.motionLayout),
+          );
+          this.presentedIndex = this.selectedIndex;
+        }
         this.selectedIndex = null;
         this.mode = "browse";
         this.callbacks.onMode(this.mode, null);
         this.callbacks.onStatus(
           this.assetCount > 0
             ? `${this.assetCount} original Stripe Press editions ready`
-            : "19 authored fallback volumes ready",
+            : `${this.booksData.length} authored fallback volumes ready`,
         );
         this.canvas.focus({ preventScroll: true });
       }
@@ -764,66 +1006,45 @@ export class ShelfEngine {
       this.callbacks.onActiveIndex(this.activeIndex);
     }
     this.shelfGroup.position.x = -this.xAtIndex(this.scrollIndex);
+    if (this.mode === "browse") {
+      this.updateBrowseMotion(delta);
+    }
   }
 
   private updateBooks(delta: number, elapsed: number) {
-    const isolated = this.selectedIndex !== null && this.focusProgress > 0.72;
+    const motionFocus =
+      this.mode === "returning"
+        ? this.focusProgress
+        : easeOutCubic(this.focusProgress);
+    const isolated = this.selectedIndex !== null && motionFocus > 0.72;
     this.shelfFurniture.visible = !isolated;
+    const focusX = window.innerWidth < 760 ? 0 : desktopFocusX;
+    const focusZ =
+      window.innerWidth < 760 ? mobileFocusZ : desktopFocusZ;
+    const focusScale =
+      window.innerWidth < 760 ? mobileFocusScale : desktopFocusScale;
+
+    if (this.selectedIndex !== null) {
+      const selected = this.runtimeBooks[this.selectedIndex];
+      this.commitBookPose(
+        selected,
+        focusedBookPose(
+          motionFocus,
+          this.motionLayout,
+          focusX,
+          focusZ,
+          focusScale,
+        ),
+      );
+      selected.content.position.y = motionFocus * 0.04;
+    }
 
     this.runtimeBooks.forEach((book) => {
-      const centerDistance = Math.abs(book.index - this.scrollIndex);
-      const reveal = ease(1 - clamp(centerDistance / 0.82, 0, 1));
       book.hover = damp(book.hover, book.targetHover, 12, delta);
 
       const isSelected = book.index === this.selectedIndex;
-      const focus = isSelected ? this.focusProgress : 0;
-      const isSuppressed = this.selectedIndex !== null && !isSelected;
       book.content.visible = !isolated || isSelected;
-      const focusOffsetX = window.innerWidth < 760 ? 0 : -0.58;
-      const focusDepth = window.innerWidth < 760 ? 1.4 : 1.66;
-      const focusScale = window.innerWidth < 760 ? 0.92 : 1.08;
-
-      const baseZ =
-        -(1 - reveal) * 0.64 + reveal * 0.4 + book.hover * 0.12;
-      const baseScale = 1 + reveal * 0.035 + book.hover * 0.015;
-      const baseRotation = THREE.MathUtils.lerp(Math.PI / 2, 0, reveal);
-
-      book.content.rotation.y = damp(
-        book.content.rotation.y,
-        THREE.MathUtils.lerp(baseRotation, 0, focus),
-        this.reducedMotion ? 22 : 10,
-        delta,
-      );
-      book.content.position.x = damp(
-        book.content.position.x,
-        THREE.MathUtils.lerp(0, focusOffsetX, focus),
-        this.reducedMotion ? 22 : 8,
-        delta,
-      );
-      book.content.position.z = damp(
-        book.content.position.z,
-        isSelected
-          ? THREE.MathUtils.lerp(baseZ, focusDepth, focus)
-          : baseZ - (isSuppressed ? this.focusProgress * 0.78 : 0),
-        this.reducedMotion ? 22 : 8,
-        delta,
-      );
-      book.content.position.y = damp(
-        book.content.position.y,
-        isSelected ? focus * 0.04 : 0,
-        this.reducedMotion ? 22 : 8,
-        delta,
-      );
-      const targetScale = isSelected
-        ? THREE.MathUtils.lerp(baseScale, focusScale, focus)
-        : baseScale * (isSuppressed ? 1 - this.focusProgress * 0.055 : 1);
-      const nextScale = damp(
-        book.content.scale.x,
-        targetScale,
-        this.reducedMotion ? 22 : 8,
-        delta,
-      );
-      book.content.scale.setScalar(nextScale);
+      if (!isSelected) book.content.position.y = 0;
 
       if (book.livingMaterial) {
         book.livingMaterial.uniforms.uTime.value = elapsed;
@@ -831,8 +1052,10 @@ export class ShelfEngine {
           this.reducedMotion
             ? 0
             : isSelected
-              ? 0.24 + focus * 0.55
-              : reveal * 0.24;
+              ? 0.24 + motionFocus * 0.55
+              : book.index === this.presentedIndex
+                ? 0.24 + book.hover * 0.08
+                : book.hover * 0.04;
         book.livingMaterial.uniforms.uStrength.value = damp(
           book.livingMaterial.uniforms.uStrength.value,
           livingStrength,
@@ -848,22 +1071,42 @@ export class ShelfEngine {
     const selected = this.runtimeBooks[this.selectedIndex];
     const worldPosition = new THREE.Vector3();
     selected.content.getWorldPosition(worldPosition);
-    const mobileOffset = window.innerWidth < 760 ? -0.28 : 0;
+    this.frameFocusedBook(worldPosition);
+    this.camera.position.lerp(
+      this.focusCameraPosition,
+      1 - Math.exp(-(this.reducedMotion ? 28 : 13) * delta),
+    );
+    this.camera.lookAt(this.focusCameraTarget);
+  }
+
+  private frameFocusedBook(worldPosition: THREE.Vector3) {
+    const width = Math.max(1, this.canvas.clientWidth);
+    const isMobile = width < 760;
+    const detailWidth =
+      width <= 1020
+        ? Math.min(compactDetailMaxWidth, width * compactDetailWidthRatio)
+        : Math.min(desktopDetailMaxWidth, width * desktopDetailWidthRatio);
+    const focusDistance = isMobile ? 5.8 : 5.4;
+    const horizontalHalfSpan =
+      Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)) *
+      focusDistance *
+      this.camera.aspect;
+    // The detail panel overlays the right edge of the canvas. Looking slightly
+    // to the right places the book at the center of the unobscured stage.
+    const stageCenterOffset = isMobile
+      ? 0
+      : (detailWidth / width) * horizontalHalfSpan;
+
     this.focusCameraTarget.set(
-      worldPosition.x,
-      worldPosition.y + mobileOffset,
+      worldPosition.x + stageCenterOffset,
+      worldPosition.y + (isMobile ? -0.28 : 0),
       worldPosition.z,
     );
     this.focusCameraPosition.set(
-      worldPosition.x + 0.58,
+      this.focusCameraTarget.x + (isMobile ? 0 : 0.58),
       worldPosition.y + 0.12,
-      worldPosition.z + (window.innerWidth < 760 ? 5.8 : 5.4),
+      worldPosition.z + focusDistance,
     );
-    this.camera.position.lerp(
-      this.focusCameraPosition,
-      1 - Math.exp(-(this.reducedMotion ? 20 : 5.6) * delta),
-    );
-    this.camera.lookAt(this.focusCameraTarget);
   }
 
   private handleResize = () => {
@@ -886,73 +1129,173 @@ export class ShelfEngine {
     }
   };
 
-  private async loadMintAssets() {
+  private async loadStripeAssets() {
     try {
-      this.callbacks.onStatus("Loading nineteen original Mint editions");
-      const response = await fetch("/assets/mint/manifest.json");
-      if (!response.ok) throw new Error("Mint asset manifest unavailable");
+      this.callbacks.onStatus("Loading the original Stripe Press materials");
+      const [booksResponse, objResponse] = await Promise.all([
+        fetch(`${STRIPE_ASSET_ROOT}/books.json`),
+        fetch(`${STRIPE_ASSET_ROOT}/mesh/stripe-press-book.obj`),
+      ]);
+      if (!booksResponse.ok || !objResponse.ok) {
+        throw new Error("Stripe Press asset archive unavailable");
+      }
+      const bookAssets = (await booksResponse.json()) as StripeBookAsset[];
+      const parsed = new OBJLoader().parse(await objResponse.text());
+      const sourceMesh = parsed.children.find(
+        (child): child is THREE.Mesh => child instanceof THREE.Mesh,
+      );
+      if (!sourceMesh) throw new Error("Shared book mesh unavailable");
 
-      const manifest = (await response.json()) as MintAssetManifest;
+      // Normalize the imported asset once. Every edition then shares a centered
+      // canonical mesh while presentation rotation remains on its wrapper.
+      const geometry = sourceMesh.geometry.clone();
+      geometry.computeBoundingBox();
+      if (!geometry.boundingBox) throw new Error("Shared book bounds unavailable");
+      geometry.boundingBox.getSize(this.stripeGeometrySize);
+      if (
+        this.stripeGeometrySize.x <= 0 ||
+        this.stripeGeometrySize.y <= 0 ||
+        this.stripeGeometrySize.z <= 0
+      ) {
+        throw new Error("Shared book bounds are invalid");
+      }
+      const geometryCenter = geometry.boundingBox.getCenter(new THREE.Vector3());
+      geometry.translate(
+        -geometryCenter.x,
+        -geometryCenter.y,
+        -geometryCenter.z,
+      );
+      geometry.computeBoundingBox();
+      this.stripeGeometry = geometry;
       await Promise.allSettled(
-        manifest.assets.map((bookAsset) => this.loadMintBook(bookAsset)),
+        bookAssets.map((bookAsset) => this.loadStripeBook(bookAsset)),
       );
       this.callbacks.onStatus(
         this.assetFailures > 0
-          ? `${this.assetCount} Mint editions loaded · ${this.assetFailures} authored fallbacks`
-          : `${this.assetCount} original Mint editions ready`,
+          ? `${this.assetCount} original editions loaded · ${this.assetFailures} fallbacks`
+          : `${this.assetCount} original Stripe Press editions ready`,
       );
     } catch {
-      this.callbacks.onStatus("19 authored fallback volumes ready");
+      this.callbacks.onStatus(
+        `${this.booksData.length} authored fallback volumes ready`,
+      );
     }
   }
 
-  private async loadMintBook(bookAsset: MintBookAsset) {
+  private textureFor(
+    reference: { local_file: string | null } | undefined,
+    color = false,
+  ) {
+    if (!reference?.local_file) {
+      return Promise.resolve<THREE.Texture | null>(null);
+    }
+    const key = reference.local_file;
+    const cached = this.stripeTextureCache.get(key);
+    if (cached) return cached;
+
+    const promise = new THREE.TextureLoader()
+      .loadAsync(stripeAssetUrl(key))
+      .then((texture) => {
+        texture.name = key;
+        texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        texture.anisotropy = Math.min(
+          8,
+          this.renderer.capabilities.getMaxAnisotropy(),
+        );
+        this.stripeTextures.add(texture);
+        return texture;
+      })
+      .catch(() => null);
+    this.stripeTextureCache.set(key, promise);
+    return promise;
+  }
+
+  private async loadCustomCover(runtime: RuntimeBook, coverImage: string) {
+    try {
+      const texture = await new THREE.TextureLoader().loadAsync(coverImage);
+      if (this.isDisposed) {
+        texture.dispose();
+        return;
+      }
+
+      texture.name = `customCover:${runtime.data.id}`;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = Math.min(
+        8,
+        this.renderer.capabilities.getMaxAnisotropy(),
+      );
+
+      const material = runtime.frontSurface.material;
+      const proceduralTexture = material.map;
+      material.map = texture;
+      material.needsUpdate = true;
+      runtime.textures.push(texture);
+
+      if (proceduralTexture) {
+        const index = runtime.textures.indexOf(proceduralTexture);
+        if (index >= 0) runtime.textures.splice(index, 1);
+        proceduralTexture.dispose();
+      }
+    } catch {
+      // Keep the generated procedural cover when an optional image is missing
+      // or blocked by cross-origin policy.
+    }
+  }
+
+  private async loadStripeBook(bookAsset: StripeBookAsset) {
     const runtime = this.runtimeBooks.find(
-      (book) => book.data.id === bookAsset.id,
+      (book) => book.data.id === bookAsset.slug,
     );
-    if (!runtime) return;
+    if (!runtime || !this.stripeGeometry) return;
 
     try {
-      const gltf = await new GLTFLoader().loadAsync(bookAsset.file);
-      if (this.isDisposed) return;
+      const [diffuse, bump, foil] = await Promise.all([
+        this.textureFor(bookAsset.textures.diffuseMapCustom, true),
+        this.textureFor(
+          bookAsset.textures.bumpMapCustom ?? bookAsset.textures.bumpMapBase,
+        ),
+        this.textureFor(bookAsset.textures.foilMap),
+      ]);
+      if (!diffuse || this.isDisposed) {
+        throw new Error(`Missing cover texture for ${bookAsset.slug}`);
+      }
 
-      const root = gltf.scene;
-      root.name = `mintEdition:${bookAsset.id}`;
-      root.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        object.castShadow = true;
-        object.receiveShadow = true;
-        const materials = Array.isArray(object.material)
-          ? object.material
-          : [object.material];
-        materials.forEach((material) => {
-          if (
-            material instanceof THREE.MeshStandardMaterial ||
-            material instanceof THREE.MeshPhysicalMaterial
-          ) {
-            material.envMapIntensity = 0.55;
-            material.needsUpdate = true;
-          }
-        });
+      const material = new THREE.MeshPhysicalMaterial({
+        name: `stripePressMaterial:${bookAsset.slug}`,
+        map: diffuse,
+        bumpMap: bump,
+        bumpScale: Number(bookAsset.material.bumpScaleCustom ?? 0.035),
+        metalnessMap: foil,
+        metalness: foil ? 0.22 : 0.04,
+        roughness: 0.68,
+        clearcoat: 0.12,
+        clearcoatRoughness: 0.55,
       });
+      const mesh = new THREE.Mesh(this.stripeGeometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const root = new THREE.Group();
+      root.name = `stripePressEdition:${bookAsset.slug}`;
+      root.add(mesh);
+      root.rotation.y = stripeBookCoverFacingRotationY;
 
-      root.updateMatrixWorld(true);
-      const sourceBounds = new THREE.Box3().setFromObject(root);
-      const sourceSize = sourceBounds.getSize(new THREE.Vector3());
       const targetWidth = 1.31 + ((runtime.index % 5) - 2) * 0.018;
       root.scale.set(
-        targetWidth / Math.max(0.001, sourceSize.x),
-        runtime.data.height / Math.max(0.001, sourceSize.y),
-        runtime.data.thickness / Math.max(0.001, sourceSize.z),
+        runtime.data.thickness / this.stripeGeometrySize.x,
+        runtime.data.height / this.stripeGeometrySize.y,
+        targetWidth / this.stripeGeometrySize.z,
       );
       root.updateMatrixWorld(true);
-      const normalized = new THREE.Box3().setFromObject(root);
-      const center = normalized.getCenter(new THREE.Vector3());
-      root.position.sub(center);
+      root.userData.displaySize = {
+        width: targetWidth,
+        height: runtime.data.height,
+        thickness: runtime.data.thickness,
+      };
+      root.userData.coverFacing = "+Z";
 
       runtime.assetHolder.add(root);
       runtime.physical.visible = false;
-      runtime.titleDecal.visible = true;
+      runtime.titleDecal.visible = false;
       runtime.textures.forEach((texture) => texture.dispose());
       runtime.textures.length = 0;
       this.assetCount += 1;
@@ -969,6 +1312,7 @@ export class ShelfEngine {
   browseTo(index: number) {
     if (this.mode !== "browse") return;
     const next = clamp(Math.round(index), 0, this.runtimeBooks.length - 1);
+    this.pendingFocusIndex = null;
     this.targetScrollIndex = next;
     this.lastInputTime = performance.now() - 1000;
   }
@@ -979,18 +1323,25 @@ export class ShelfEngine {
     this.targetScrollIndex = next;
     this.scrollIndex = next;
     this.activeIndex = next;
-    this.selectedIndex = next;
-    this.focusProgress = 0;
-    this.mode = "focusing";
-    this.runtimeBooks.forEach((book) => {
-      book.targetHover = 0;
-    });
+    this.pendingFocusIndex = next;
     this.callbacks.onActiveIndex(next);
-    this.callbacks.onMode(this.mode, next);
-    this.callbacks.onStatus(`Opening ${this.runtimeBooks[next].data.shortTitle}`);
+    this.callbacks.onStatus(
+      `Preparing ${this.runtimeBooks[next].data.shortTitle}`,
+    );
+    if (
+      this.browseMotionPhase === "idle" &&
+      this.presentedIndex === next
+    ) {
+      this.beginFocus(next);
+    }
   }
 
   returnToShelf() {
+    if (this.mode === "browse" && this.pendingFocusIndex !== null) {
+      this.pendingFocusIndex = null;
+      this.callbacks.onStatus("Opening cancelled");
+      return;
+    }
     if (this.mode === "browse" || this.mode === "returning") return;
     this.controls.enabled = false;
     this.mode = "returning";
@@ -1003,17 +1354,33 @@ export class ShelfEngine {
     const selected = this.runtimeBooks[this.selectedIndex];
     const worldPosition = new THREE.Vector3();
     selected.content.getWorldPosition(worldPosition);
-    this.controls.target.set(
-      worldPosition.x,
-      worldPosition.y + (window.innerWidth < 760 ? -0.28 : 0),
-      worldPosition.z,
-    );
-    this.camera.position.set(
-      worldPosition.x + 0.58,
-      worldPosition.y + 0.12,
-      worldPosition.z + (window.innerWidth < 760 ? 5.8 : 5.4),
-    );
+    this.frameFocusedBook(worldPosition);
+    this.controls.target.copy(this.focusCameraTarget);
+    this.camera.position.copy(this.focusCameraPosition);
     this.controls.update();
+  }
+
+  private findAnyCollision(): [string, string] | null {
+    for (let leftIndex = 0; leftIndex < this.runtimeBooks.length; leftIndex += 1) {
+      const left = this.runtimeBooks[leftIndex];
+      for (
+        let rightIndex = leftIndex + 1;
+        rightIndex < this.runtimeBooks.length;
+        rightIndex += 1
+      ) {
+        const right = this.runtimeBooks[rightIndex];
+        if (
+          bookFootprintsOverlap(
+            this.footprintFor(left),
+            this.footprintFor(right),
+            this.motionLayout.collisionMargin,
+          )
+        ) {
+          return [left.data.id, right.data.id];
+        }
+      }
+    }
+    return null;
   }
 
   getDiagnostics() {
@@ -1023,13 +1390,17 @@ export class ShelfEngine {
       activeIndex: this.activeIndex,
       selectedIndex: this.selectedIndex,
       books: this.runtimeBooks.length,
-      mintAssetsLoaded: this.assetCount,
-      mintAssetFailures: this.assetFailures,
+      stripeAssetsLoaded: this.assetCount,
+      stripeAssetFailures: this.assetFailures,
       drawCalls: info.render.calls,
       triangles: info.render.triangles,
       geometries: info.memory.geometries,
       textures: info.memory.textures,
       pixelRatio: this.renderer.getPixelRatio(),
+      motionPhase: this.browseMotionPhase,
+      collisionRejects: this.collisionRejects,
+      lastCollisionPair: this.lastCollisionPair,
+      currentCollision: this.findAnyCollision(),
       canvas: {
         width: this.canvas.width,
         height: this.canvas.height,
@@ -1064,6 +1435,11 @@ export class ShelfEngine {
     this.runtimeBooks.forEach((book) => {
       book.textures.forEach((texture) => texture.dispose());
     });
+    this.stripeTextures.forEach((texture) => texture.dispose());
+    this.stripeTextureCache.clear();
+    this.stripeTextures.clear();
+    this.stripeGeometry = null;
+    this.stripeGeometrySize.set(0, 0, 0);
     this.renderer.dispose();
     delete (
       window as unknown as {

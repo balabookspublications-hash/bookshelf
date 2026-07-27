@@ -200,10 +200,28 @@ canvas:focus-visible {
   bottom: clamp(178px, 23vh, 228px);
   left: clamp(24px, 5.4vw, 92px);
   width: min(430px, 36vw);
+  isolation: isolate;
   pointer-events: none;
   transition:
     opacity 420ms ease,
     transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.browse-caption::before {
+  position: absolute;
+  z-index: -1;
+  top: -42px;
+  right: -72px;
+  bottom: -38px;
+  left: -92px;
+  content: "";
+  background: linear-gradient(
+    90deg,
+    rgba(238, 232, 219, 0.96) 0%,
+    rgba(238, 232, 219, 0.82) 58%,
+    rgba(238, 232, 219, 0) 100%
+  );
+  pointer-events: none;
 }
 
 .is-focused .browse-caption {
@@ -694,31 +712,6 @@ canvas:focus-visible {
   letter-spacing: 0.12em;
   text-overflow: ellipsis;
   text-transform: uppercase;
-}
-
-.mint-edition-note {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  max-width: 500px;
-  margin-top: 24px;
-  padding: 11px 13px;
-  border: 1px solid var(--hairline);
-  color: var(--ink);
-  font-size: 7px;
-  font-weight: 650;
-  letter-spacing: 0.12em;
-  text-decoration: none;
-  text-transform: uppercase;
-  transition: background-color 180ms ease;
-}
-
-.mint-edition-note:hover {
-  background: rgba(36, 32, 27, 0.05);
-}
-
-.mint-edition-note span:last-child {
-  color: var(--ink-soft);
 }
 
 .focus-controls {
@@ -1311,6 +1304,10 @@ canvas:focus-visible {
       rgba(238, 232, 219, 0.96) 45px,
       var(--paper) 64px
     );
+  }
+
+  .browse-caption::before {
+    display: none;
   }
 
   .browse-caption h1 {

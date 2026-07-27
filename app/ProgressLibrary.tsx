@@ -5,10 +5,12 @@ import { AssetLibrary } from "./AssetLibrary";
 import { catalog } from "./catalog";
 import { ShelfEngine, type ShelfMode } from "./ShelfEngine";
 import {
-  MINT_ASSET_ROOT,
-  type MintAssetManifest,
-  type MintBookAsset,
-} from "./mint-assets";
+  STRIPE_ASSET_ROOT,
+  stripeAssetUrl,
+  type StripeAssetManifest,
+  type StripeBookAsset,
+} from "./stripe-assets";
+import { siteConfig } from "./site-config";
 
 function ArrowIcon({ direction }: { direction: "left" | "right" }) {
   return (
@@ -28,8 +30,8 @@ export function ProgressLibrary() {
   const [status, setStatus] = useState("Preparing the complete catalog");
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
   const [assetManifest, setAssetManifest] =
-    useState<MintAssetManifest | null>(null);
-  const [assetBooks, setAssetBooks] = useState<MintBookAsset[]>([]);
+    useState<StripeAssetManifest | null>(null);
+  const [assetBooks, setAssetBooks] = useState<StripeBookAsset[]>([]);
 
   const activeBook = catalog[activeIndex];
   const selectedBook = useMemo(
@@ -39,11 +41,17 @@ export function ProgressLibrary() {
   const selectedBookAssets = useMemo(
     () =>
       selectedBook
-        ? assetBooks.find((book) => book.id === selectedBook.id) ?? null
+        ? assetBooks.find((book) => book.slug === selectedBook.id) ?? null
         : null,
     [assetBooks, selectedBook],
   );
   const isFocused = mode !== "browse";
+  const localAssetCount = assetManifest
+    ? assetManifest.counts.textures +
+      assetManifest.counts.javascript_files +
+      assetManifest.shaders.length +
+      7
+    : 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -76,16 +84,25 @@ export function ProgressLibrary() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${MINT_ASSET_ROOT}/manifest.json`)
-      .then((response) => response.json())
-      .then((manifest) => {
+    Promise.all([
+      fetch(`${STRIPE_ASSET_ROOT}/manifest.json`).then((response) =>
+        response.json(),
+      ),
+      fetch(`${STRIPE_ASSET_ROOT}/books.json`).then((response) =>
+        response.json(),
+      ),
+    ])
+      .then(([manifest, books]) => {
         if (cancelled) return;
-        const typedManifest = manifest as MintAssetManifest;
-        setAssetManifest(typedManifest);
-        setAssetBooks(typedManifest.assets);
+        setAssetManifest(manifest as StripeAssetManifest);
+        setAssetBooks(books as StripeBookAsset[]);
       })
       .catch(() => {
-        if (!cancelled) setStatus("Books ready · asset index unavailable");
+        if (!cancelled) {
+          setStatus(
+            `${catalog.length} authored volumes ready · optional edition assets unavailable`,
+          );
+        }
       });
     return () => {
       cancelled = true;
@@ -113,30 +130,34 @@ export function ProgressLibrary() {
         data-testid="shelf-canvas"
         role="application"
         tabIndex={0}
-        aria-label="Interactive three-dimensional shelf of nineteen Stripe Press books. Drag or use the arrow keys to browse. Press Enter to inspect the selected book."
+        aria-label={`Interactive three-dimensional shelf of ${catalog.length} books. Drag or use the arrow keys to browse. Press Enter to inspect the selected book.`}
       />
 
       <header className="site-header">
-        <div className="wordmark" aria-label="Stripe Press, the complete shelf">
-          <span>STRIPE PRESS</span>
+        <div
+          className="wordmark"
+          aria-label={`${siteConfig.wordmark}, ${siteConfig.collectionName}`}
+        >
+          <span>{siteConfig.wordmark}</span>
           <span className="wordmark__divider" />
-          <span>THE COMPLETE SHELF</span>
+          <span>{siteConfig.collectionName}</span>
         </div>
         <div className="header-actions">
           <div className="edition-mark">
-            <span>19 VOLUMES</span>
+            <span>{catalog.length} VOLUMES</span>
             <span>01 CONTINUOUS SHELF</span>
           </div>
-          <button
-            type="button"
-            className="asset-library-trigger"
-            data-testid="open-asset-library"
-            disabled={!assetManifest}
-            onClick={() => setAssetLibraryOpen(true)}
-          >
-            <span>View all assets</span>
-            <span>{assetManifest ? "19" : "…"}</span>
-          </button>
+          {assetManifest ? (
+            <button
+              type="button"
+              className="asset-library-trigger"
+              data-testid="open-asset-library"
+              onClick={() => setAssetLibraryOpen(true)}
+            >
+              <span>View local assets</span>
+              <span>{localAssetCount}</span>
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -235,7 +256,7 @@ export function ProgressLibrary() {
             </div>
 
             <div className="book-details__copy">
-              <p className="eyebrow">STRIPE PRESS EDITION</p>
+              <p className="eyebrow">{siteConfig.editionEyebrow}</p>
               <h2>{selectedBook.title}</h2>
               <p className="book-details__author">{selectedBook.author}</p>
               <p className="book-details__description">
@@ -259,14 +280,42 @@ export function ProgressLibrary() {
               </dl>
 
               {selectedBookAssets ? (
-                <a
-                  className="mint-edition-note"
-                  href={selectedBookAssets.file}
-                  download
+                <div
+                  className="book-material-strip"
+                  aria-label={`Material maps used by ${selectedBook.title}`}
                 >
-                  <span>Mint artifact</span>
-                  <span>Original local GLB ↓</span>
-                </a>
+                  {Object.entries(selectedBookAssets.textures)
+                    .filter(
+                      ([key, texture]) =>
+                        texture.local_file &&
+                        [
+                          "diffuseMapCustom",
+                          "bumpMapCustom",
+                          "foilMap",
+                        ].includes(key),
+                    )
+                    .map(([key, texture]) => (
+                      <a
+                        key={key}
+                        href={stripeAssetUrl(texture.local_file!)}
+                        download
+                        title={`Download ${texture.name}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={stripeAssetUrl(texture.local_file!)}
+                          alt=""
+                        />
+                        <span>
+                          {key === "diffuseMapCustom"
+                            ? "Diffuse"
+                            : key === "bumpMapCustom"
+                              ? "Bump"
+                              : "Foil"}
+                        </span>
+                      </a>
+                    ))}
+                </div>
               ) : null}
 
               <a
@@ -276,7 +325,9 @@ export function ProgressLibrary() {
                 target="_blank"
                 rel="noreferrer"
               >
-                <span>View at Stripe Press</span>
+                <span>
+                  {selectedBook.linkLabel ?? siteConfig.bookLinkLabel}
+                </span>
                 <span aria-hidden="true">↗</span>
               </a>
             </div>
@@ -312,12 +363,10 @@ export function ProgressLibrary() {
           <span />
           <span />
         </div>
-        <p>Assembling nineteen volumes</p>
+        <p>Assembling {catalog.length} volumes</p>
       </div>
 
-      <p className="independent-note">
-        Independent editorial study · original Mint-generated 3D artwork.
-      </p>
+      <p className="independent-note">{siteConfig.independentNote}</p>
 
       <AssetLibrary
         books={assetBooks}

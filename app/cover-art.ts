@@ -1,4 +1,5 @@
 import type { CatalogBook } from "./catalog";
+import { siteConfig } from "./site-config";
 
 const serif = '"Newsreader Variable", "Iowan Old Style", Georgia, serif';
 const sans = '"Inter Variable", Inter, Arial, sans-serif';
@@ -492,7 +493,7 @@ function drawCoverTypography(
   ctx.textBaseline = "top";
   ctx.letterSpacing = "7px";
   ctx.font = `600 25px ${sans}`;
-  ctx.fillText("STRIPE PRESS", 82, 74);
+  ctx.fillText(siteConfig.coverImprint, 82, 74);
 
   ctx.letterSpacing = "0px";
   const titleSize =
@@ -521,7 +522,7 @@ function drawCoverTypography(
     ctx.globalAlpha = 0.75;
     ctx.font = `500 20px ${sans}`;
     ctx.letterSpacing = "3px";
-    ctx.fillText("IDEAS FOR PROGRESS", 82, height - 90);
+    ctx.fillText(siteConfig.coverTagline, 82, height - 90);
   }
   ctx.restore();
 }
@@ -597,7 +598,7 @@ export function createSpineCover(book: CatalogBook) {
   ctx.fillStyle = book.ink;
   ctx.font = `700 26px ${sans}`;
   ctx.textAlign = "center";
-  ctx.fillText("SP", logicalWidth / 2 + 10, logicalHeight - 42);
+  ctx.fillText(siteConfig.spineMark, logicalWidth / 2 + 10, logicalHeight - 42);
   ctx.restore();
   return canvas;
 }
@@ -644,7 +645,11 @@ export function createBackCover(book: CatalogBook) {
   ctx.globalAlpha = 0.78;
   ctx.font = `500 20px ${sans}`;
   ctx.letterSpacing = "3px";
-  ctx.fillText("STRIPE PRESS · IDEAS FOR PROGRESS", 110, 1380);
+  ctx.fillText(
+    `${siteConfig.coverImprint} · ${siteConfig.coverTagline}`,
+    110,
+    1380,
+  );
   ctx.restore();
   return canvas;
 }

@@ -1,0 +1,11 @@
+# Repo-scoped Mint MCP connection. Codex loads project configuration after the
+# contributor trusts this repository; OAuth credentials remain in local Codex
+# state and are never stored here.
+[mcp_servers.mint]
+url = "https://mcp.mint.gg/mcp"
+auth = "oauth"
+enabled = true
+required = false
+default_tools_approval_mode = "writes"
+startup_timeout_sec = 20
+tool_timeout_sec = 60

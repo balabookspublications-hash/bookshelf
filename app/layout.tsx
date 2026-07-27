@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import "@fontsource-variable/newsreader";
 import "@fontsource-variable/inter";
 import "./globals.css";
+import { siteConfig } from "./site-config";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -14,15 +15,13 @@ export async function generateMetadata(): Promise<Metadata> {
     requestHeaders.get("x-forwarded-proto") ??
     (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "Stripe Press — The Complete Shelf";
-  const description =
-    "Explore nineteen Stripe Press editions as a tactile 3D bookshelf, then inspect and download all 82 publicly available source assets.";
+  const { title, description } = siteConfig;
 
   return {
     metadataBase: new URL(origin),
     title,
     description,
-    applicationName: "The Complete Shelf",
+    applicationName: siteConfig.applicationName,
     category: "books",
     openGraph: {
       title,
@@ -33,7 +32,7 @@ export async function generateMetadata(): Promise<Metadata> {
           url: `${origin}/og.png`,
           width: 1536,
           height: 1024,
-          alt: "A warm archival bookshelf holding nineteen Stripe Press editions.",
+          alt: siteConfig.socialImageAlt,
         },
       ],
     },

@@ -36,10 +36,17 @@ export type CatalogBook = {
   motif: BookMotif;
   height: number;
   thickness: number;
+  /**
+   * Optional browser URL for contributor-owned front-cover art. Put local
+   * images under `public/books/<id>/` and use a URL such as
+   * `/books/<id>/cover.webp`.
+   */
+  coverImage?: string;
+  linkLabel?: string;
   living?: boolean;
 };
 
-export const catalog: CatalogBook[] = [
+export const catalog: CatalogBook[] = ([
   {
     id: "poor-charlies-almanack",
     title: "Poor Charlie’s Almanack",
@@ -404,4 +411,6 @@ export const catalog: CatalogBook[] = [
     height: 2.14,
     thickness: 0.26,
   },
-];
+] satisfies CatalogBook[]).sort(
+  (left, right) => right.height - left.height,
+);

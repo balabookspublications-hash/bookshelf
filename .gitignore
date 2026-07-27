@@ -36,7 +36,16 @@ yarn-error.log*
 
 # typescript
 next-env.d.ts
+*.tsbuildinfo
 /dist/
 /.wrangler/
 /outputs/
 /work/
+
+# local-only working files
+/.local/
+/.openai/hosting.json
+
+# Optional third-party edition assets are intentionally not distributed.
+# Contributor-owned covers belong under /public/books/ instead.
+/public/assets/stripe-press/
