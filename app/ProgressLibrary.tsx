@@ -1,15 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssetLibrary } from "./AssetLibrary";
 import { catalog } from "./catalog";
 import { ShelfEngine, type ShelfMode } from "./ShelfEngine";
-import {
-  STRIPE_ASSET_ROOT,
-  stripeAssetUrl,
-  type StripeAssetManifest,
-  type StripeBookAsset,
-} from "./stripe-assets";
 import { siteConfig } from "./site-config";
 
 function ArrowIcon({ direction }: { direction: "left" | "right" }) {
@@ -28,30 +21,13 @@ export function ProgressLibrary() {
   const [mode, setMode] = useState<ShelfMode>("browse");
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState("Preparing the complete catalog");
-  const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
-  const [assetManifest, setAssetManifest] =
-    useState<StripeAssetManifest | null>(null);
-  const [assetBooks, setAssetBooks] = useState<StripeBookAsset[]>([]);
 
   const activeBook = catalog[activeIndex];
   const selectedBook = useMemo(
     () => (selectedIndex === null ? null : catalog[selectedIndex]),
     [selectedIndex],
   );
-  const selectedBookAssets = useMemo(
-    () =>
-      selectedBook
-        ? assetBooks.find((book) => book.slug === selectedBook.id) ?? null
-        : null,
-    [assetBooks, selectedBook],
-  );
   const isFocused = mode !== "browse";
-  const localAssetCount = assetManifest
-    ? assetManifest.counts.textures +
-      assetManifest.counts.javascript_files +
-      assetManifest.shaders.length +
-      7
-    : 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -82,47 +58,11 @@ export function ProgressLibrary() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      fetch(`${STRIPE_ASSET_ROOT}/manifest.json`).then((response) =>
-        response.json(),
-      ),
-      fetch(`${STRIPE_ASSET_ROOT}/books.json`).then((response) =>
-        response.json(),
-      ),
-    ])
-      .then(([manifest, books]) => {
-        if (cancelled) return;
-        setAssetManifest(manifest as StripeAssetManifest);
-        setAssetBooks(books as StripeBookAsset[]);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus(
-            `${catalog.length} authored volumes ready · optional edition assets unavailable`,
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!assetLibraryOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAssetLibraryOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [assetLibraryOpen]);
-
   return (
     <main
       className={`press-experience ${ready ? "is-ready" : ""} ${
         isFocused ? "is-focused" : "is-browsing"
-      } ${assetLibraryOpen ? "is-assets-open" : ""}`}
+      }`}
     >
       <canvas
         ref={canvasRef}
@@ -147,17 +87,6 @@ export function ProgressLibrary() {
             <span>{catalog.length} VOLUMES</span>
             <span>01 CONTINUOUS SHELF</span>
           </div>
-          {assetManifest ? (
-            <button
-              type="button"
-              className="asset-library-trigger"
-              data-testid="open-asset-library"
-              onClick={() => setAssetLibraryOpen(true)}
-            >
-              <span>View local assets</span>
-              <span>{localAssetCount}</span>
-            </button>
-          ) : null}
         </div>
       </header>
 
@@ -279,45 +208,6 @@ export function ProgressLibrary() {
                 </div>
               </dl>
 
-              {selectedBookAssets ? (
-                <div
-                  className="book-material-strip"
-                  aria-label={`Material maps used by ${selectedBook.title}`}
-                >
-                  {Object.entries(selectedBookAssets.textures)
-                    .filter(
-                      ([key, texture]) =>
-                        texture.local_file &&
-                        [
-                          "diffuseMapCustom",
-                          "bumpMapCustom",
-                          "foilMap",
-                        ].includes(key),
-                    )
-                    .map(([key, texture]) => (
-                      <a
-                        key={key}
-                        href={stripeAssetUrl(texture.local_file!)}
-                        download
-                        title={`Download ${texture.name}`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={stripeAssetUrl(texture.local_file!)}
-                          alt=""
-                        />
-                        <span>
-                          {key === "diffuseMapCustom"
-                            ? "Diffuse"
-                            : key === "bumpMapCustom"
-                              ? "Bump"
-                              : "Foil"}
-                        </span>
-                      </a>
-                    ))}
-                </div>
-              ) : null}
-
               <a
                 className="official-link"
                 data-testid="official-link"
@@ -367,13 +257,6 @@ export function ProgressLibrary() {
       </div>
 
       <p className="independent-note">{siteConfig.independentNote}</p>
-
-      <AssetLibrary
-        books={assetBooks}
-        manifest={assetManifest}
-        open={assetLibraryOpen}
-        onClose={() => setAssetLibraryOpen(false)}
-      />
 
       <div className="sr-only" aria-live="polite">
         {isFocused && selectedBook

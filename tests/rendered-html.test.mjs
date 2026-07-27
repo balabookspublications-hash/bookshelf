@@ -70,6 +70,10 @@ test("server-renders the complete editorial bookshelf shell", async () => {
   assert.match(html, /summary_large_image/);
   assert.match(html, /1200/);
   assert.match(html, /630/);
+  assert.doesNotMatch(
+    html,
+    /View (?:local|all) assets|open-asset-library|asset-library/i,
+  );
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton/);
 });
 
@@ -88,10 +92,7 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.match(engine, /loadCustomCover\(runtime, book\.coverImage\)/);
   assert.match(engine, /customCover:\$\{runtime\.data\.id\}/);
   assert.match(engine, /Keep the generated procedural cover/);
-  assert.match(
-    engine,
-    /\$\{this\.booksData\.length\} authored fallback volumes ready/,
-  );
+  assert.match(engine, /\$\{this\.booksData\.length\} volumes ready/);
   assert.match(coverArt, /siteConfig\.coverImprint/);
   assert.doesNotMatch(coverArt, /STRIPE PRESS/);
   assert.match(addingBooks, /public\/books\/my-book\/cover\.webp/);
@@ -129,8 +130,12 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.match(engine, /private motionBookIndex: number \| null/);
   assert.doesNotMatch(engine, /const reveal = ease/);
   assert.match(engine, /frameFocusedBook\(worldPosition\)/);
-  assert.match(engine, /detailWidth \/ width/);
+  assert.match(engine, /this\.camera\.setViewOffset/);
+  assert.match(engine, /this\.focusCameraTarget\.copy\(worldPosition\)/);
+  assert.doesNotMatch(engine, /worldPosition\.x \+ stageCenterOffset/);
   assert.match(engine, /this\.controls\.target\.copy\(this\.focusCameraTarget\)/);
+  assert.match(engine, /bookInspectionIdle:/);
+  assert.match(engine, /this\.mode === "inspect" && !this\.reducedMotion/);
   assert.match(styles, /\.browse-caption::before/);
   assert.match(styles, /rgba\(238, 232, 219, 0\.96\)/);
   assert.doesNotMatch(

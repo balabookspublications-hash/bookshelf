@@ -33,11 +33,12 @@ scene
     ├── shelfFurniture            shelf boards; hidden in close inspection
     └── slot                      permanent catalog position and book height
         └── content               animated x, z, yaw, scale, and hover lift
-            ├── physical          procedural boards, pages, spine, cover art
-            ├── assetHolder       optional imported edition mesh
-            ├── titleDecal        optional overlay for imported editions
-            ├── living shimmer    optional animated shader plane
-            └── pickProxy         invisible, simple raycast geometry
+            └── inspectionIdle    centered, reduced-motion-aware idle motion
+                ├── physical      procedural boards, pages, spine, cover art
+                ├── assetHolder   optional imported edition mesh
+                ├── titleDecal    optional overlay for imported editions
+                ├── living shimmer optional animated shader plane
+                └── pickProxy     invisible, simple raycast geometry
 ```
 
 The `slot` never participates in the book choreography. It anchors a volume to
@@ -49,6 +50,10 @@ An imported mesh is normalized and scaled inside `assetHolder`; it does not
 change the motion coordinate system. Likewise, a custom `coverImage` replaces
 only the procedural front texture. This separation is why asset swaps do not
 need new animation code.
+
+The `inspectionIdle` group has its origin at the book center. It adds only a
+small, slowly varying lift and rotation after inspection becomes interactive,
+so procedural and imported editions share the same centered idle motion.
 
 ## One animation owner
 
@@ -131,10 +136,11 @@ decisive at the start and controlled near the endpoint. Return uses the same
 route in reverse from the live focus progress, so an interrupted state does not
 teleport.
 
-The camera derives its target from the selected book’s current world position.
-On desktop it also accounts for the width of the HTML details panel, placing
-the book in the center of the unobscured canvas rather than the browser window.
-Mobile uses a centered, smaller pose and a slightly wider camera.
+The camera and OrbitControls both target the selected book’s exact world
+center. An asymmetric camera view offset accounts for the HTML details panel,
+placing the book in the center of the unobscured canvas without moving the
+orbit pivot away from the book. Mobile uses a centered, smaller pose and a
+slightly wider camera.
 
 Camera interpolation uses:
 
@@ -269,6 +275,7 @@ The engine reads `prefers-reduced-motion` once at startup. Under reduced motion:
   floor;
 - focus and return complete in 80 ms;
 - shelf and camera damping are stronger;
+- inspection idle lift and rotation are disabled;
 - the animated cover sheen is disabled.
 
 CSS independently reduces animations and transitions to 1 ms. The experience

@@ -46,6 +46,7 @@ type RuntimeBook = {
   index: number;
   slot: THREE.Group;
   content: THREE.Group;
+  inspectionIdle: THREE.Group;
   physical: THREE.Group;
   assetHolder: THREE.Group;
   frontSurface: THREE.Mesh<
@@ -60,6 +61,7 @@ type RuntimeBook = {
   pose: BookPose;
   hover: number;
   targetHover: number;
+  idleAmount: number;
   textures: THREE.Texture[];
 };
 
@@ -80,6 +82,10 @@ const desktopFocusZ = 1.66;
 const desktopFocusScale = 1.08;
 const mobileFocusZ = 1.4;
 const mobileFocusScale = 0.92;
+const inspectionIdleLift = 0.014;
+const inspectionIdlePitch = THREE.MathUtils.degToRad(0.28);
+const inspectionIdleYaw = THREE.MathUtils.degToRad(0.48);
+const inspectionIdleRoll = THREE.MathUtils.degToRad(0.22);
 
 // Downloaded Stripe OBJ basis: X = thickness, Y = up/height, Z = width,
 // and the front cover is on +X. Rotating -90° maps that cover to world +Z,
@@ -398,13 +404,17 @@ export class ShelfEngine {
     content.rotation.y = pose.yaw;
     content.scale.setScalar(pose.scale);
 
+    const inspectionIdle = new THREE.Group();
+    inspectionIdle.name = `bookInspectionIdle:${book.id}`;
+    content.add(inspectionIdle);
+
     const physical = new THREE.Group();
     physical.name = `proceduralBook:${book.id}`;
-    content.add(physical);
+    inspectionIdle.add(physical);
 
     const assetHolder = new THREE.Group();
     assetHolder.name = `stripePressBook:${book.id}`;
-    content.add(assetHolder);
+    inspectionIdle.add(assetHolder);
 
     const boardMaterial = new THREE.MeshPhysicalMaterial({
       color: book.cover,
@@ -518,7 +528,7 @@ export class ShelfEngine {
     titleDecal.name = "accurateTitleDecal";
     titleDecal.position.z = depth * 0.5 + 0.026;
     titleDecal.visible = false;
-    content.add(titleDecal);
+    inspectionIdle.add(titleDecal);
 
     const backSurface = new THREE.Mesh(
       new THREE.PlaneGeometry(width - 0.065, book.height - 0.065),
@@ -554,7 +564,7 @@ export class ShelfEngine {
       );
       shimmer.name = "livingCoverShimmer";
       shimmer.position.z = depth * 0.5 + 0.034;
-      content.add(shimmer);
+      inspectionIdle.add(shimmer);
     }
 
     const pickProxy = new THREE.Mesh(
@@ -567,7 +577,7 @@ export class ShelfEngine {
     );
     pickProxy.name = `pick:${book.id}`;
     pickProxy.userData.bookIndex = index;
-    content.add(pickProxy);
+    inspectionIdle.add(pickProxy);
     this.pickTargets.push(pickProxy);
 
     return {
@@ -575,6 +585,7 @@ export class ShelfEngine {
       index,
       slot,
       content,
+      inspectionIdle,
       physical,
       assetHolder,
       frontSurface,
@@ -586,6 +597,7 @@ export class ShelfEngine {
       pose,
       hover: 0,
       targetHover: 0,
+      idleAmount: 0,
       textures,
     };
   }
@@ -975,6 +987,7 @@ export class ShelfEngine {
         0,
         1,
       );
+      this.applyFocusViewOffset(easeOutCubic(this.focusProgress));
       this.camera.position.lerp(
         this.responsiveBrowseCamera,
         1 - Math.exp(-(this.reducedMotion ? 24 : 14) * delta),
@@ -991,11 +1004,7 @@ export class ShelfEngine {
         this.selectedIndex = null;
         this.mode = "browse";
         this.callbacks.onMode(this.mode, null);
-        this.callbacks.onStatus(
-          this.assetCount > 0
-            ? `${this.assetCount} original Stripe Press editions ready`
-            : `${this.booksData.length} authored fallback volumes ready`,
-        );
+        this.callbacks.onStatus(`${this.booksData.length} volumes ready`);
         this.canvas.focus({ preventScroll: true });
       }
     }
@@ -1040,7 +1049,6 @@ export class ShelfEngine {
           focusScale,
         ),
       );
-      selected.content.position.y = motionFocus * 0.04;
     }
 
     this.runtimeBooks.forEach((book) => {
@@ -1048,7 +1056,24 @@ export class ShelfEngine {
 
       const isSelected = book.index === this.selectedIndex;
       book.content.visible = !isolated || isSelected;
-      if (!isSelected) book.content.position.y = 0;
+      book.content.position.y = isSelected ? motionFocus * 0.04 : 0;
+
+      const idleTarget =
+        isSelected && this.mode === "inspect" && !this.reducedMotion ? 1 : 0;
+      book.idleAmount = damp(book.idleAmount, idleTarget, 5, delta);
+      const idleStrength = isSelected ? book.idleAmount : 0;
+      const idlePhase = elapsed * 0.78 + book.index * 0.37;
+      book.inspectionIdle.position.y =
+        Math.sin(idlePhase) * inspectionIdleLift * idleStrength;
+      book.inspectionIdle.rotation.set(
+        Math.sin(idlePhase * 0.73 + 0.8) *
+          inspectionIdlePitch *
+          idleStrength,
+        Math.sin(idlePhase * 0.61) * inspectionIdleYaw * idleStrength,
+        Math.sin(idlePhase * 0.89 + 1.7) *
+          inspectionIdleRoll *
+          idleStrength,
+      );
 
       if (book.livingMaterial) {
         book.livingMaterial.uniforms.uTime.value = elapsed;
@@ -1075,7 +1100,7 @@ export class ShelfEngine {
     const selected = this.runtimeBooks[this.selectedIndex];
     const worldPosition = new THREE.Vector3();
     selected.content.getWorldPosition(worldPosition);
-    this.frameFocusedBook(worldPosition);
+    this.frameFocusedBook(worldPosition, easeOutCubic(this.focusProgress));
     this.camera.position.lerp(
       this.focusCameraPosition,
       1 - Math.exp(-(this.reducedMotion ? 28 : 13) * delta),
@@ -1083,31 +1108,53 @@ export class ShelfEngine {
     this.camera.lookAt(this.focusCameraTarget);
   }
 
-  private frameFocusedBook(worldPosition: THREE.Vector3) {
+  private applyFocusViewOffset(progress: number) {
     const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
     const isMobile = width < 760;
     const detailWidth =
       width <= 1020
         ? Math.min(compactDetailMaxWidth, width * compactDetailWidthRatio)
         : Math.min(desktopDetailMaxWidth, width * desktopDetailWidthRatio);
     const focusDistance = isMobile ? 5.8 : 5.4;
-    const horizontalHalfSpan =
-      Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)) *
-      focusDistance *
-      this.camera.aspect;
-    // The detail panel overlays the right edge of the canvas. Looking slightly
-    // to the right places the book at the center of the unobscured stage.
-    const stageCenterOffset = isMobile
+    const verticalHalfSpan =
+      Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)) * focusDistance;
+    const clampedProgress = clamp(progress, 0, 1);
+    const horizontalOffset = isMobile
       ? 0
-      : (detailWidth / width) * horizontalHalfSpan;
+      : detailWidth * 0.5 * clampedProgress;
+    const verticalOffset = isMobile
+      ? (0.28 / verticalHalfSpan) * height * 0.5 * clampedProgress
+      : 0;
 
-    this.focusCameraTarget.set(
-      worldPosition.x + stageCenterOffset,
-      worldPosition.y + (isMobile ? -0.28 : 0),
-      worldPosition.z,
+    if (clampedProgress <= 0.001) {
+      this.camera.clearViewOffset();
+      return;
+    }
+
+    // Shift the composition through an asymmetric frustum. The camera and
+    // OrbitControls can then keep the exact center of the book as their target.
+    this.camera.setViewOffset(
+      width,
+      height,
+      horizontalOffset,
+      verticalOffset,
+      width,
+      height,
     );
+  }
+
+  private frameFocusedBook(
+    worldPosition: THREE.Vector3,
+    compositionProgress = 1,
+  ) {
+    const isMobile = this.canvas.clientWidth < 760;
+    const focusDistance = isMobile ? 5.8 : 5.4;
+    this.applyFocusViewOffset(compositionProgress);
+
+    this.focusCameraTarget.copy(worldPosition);
     this.focusCameraPosition.set(
-      this.focusCameraTarget.x + (isMobile ? 0 : 0.58),
+      worldPosition.x + (isMobile ? 0 : 0.58),
       worldPosition.y + 0.12,
       worldPosition.z + focusDistance,
     );
@@ -1128,14 +1175,21 @@ export class ShelfEngine {
     this.camera.fov = width < 600 ? 33 : width < 920 ? 30 : 27;
     this.camera.updateProjectionMatrix();
     if (this.mode === "browse" && this.focusProgress < 0.01) {
+      this.camera.clearViewOffset();
       this.camera.position.copy(this.responsiveBrowseCamera);
       this.camera.lookAt(browseTarget);
+    } else if (this.mode === "inspect" && this.selectedIndex !== null) {
+      const worldPosition = new THREE.Vector3();
+      this.runtimeBooks[this.selectedIndex].content.getWorldPosition(
+        worldPosition,
+      );
+      this.frameFocusedBook(worldPosition);
     }
   };
 
   private async loadStripeAssets() {
     try {
-      this.callbacks.onStatus("Loading the original Stripe Press materials");
+      this.callbacks.onStatus("Finishing the shelf");
       const [booksResponse, objResponse] = await Promise.all([
         fetch(`${STRIPE_ASSET_ROOT}/books.json`),
         fetch(`${STRIPE_ASSET_ROOT}/mesh/stripe-press-book.obj`),
@@ -1174,15 +1228,9 @@ export class ShelfEngine {
       await Promise.allSettled(
         bookAssets.map((bookAsset) => this.loadStripeBook(bookAsset)),
       );
-      this.callbacks.onStatus(
-        this.assetFailures > 0
-          ? `${this.assetCount} original editions loaded · ${this.assetFailures} fallbacks`
-          : `${this.assetCount} original Stripe Press editions ready`,
-      );
+      this.callbacks.onStatus(`${this.booksData.length} volumes ready`);
     } catch {
-      this.callbacks.onStatus(
-        `${this.booksData.length} authored fallback volumes ready`,
-      );
+      this.callbacks.onStatus(`${this.booksData.length} volumes ready`);
     }
   }
 
