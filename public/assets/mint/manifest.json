@@ -1,0 +1,83 @@
+{
+  "manifestVersion": 1,
+  "generatedAt": "2026-07-27",
+  "collection": "Progress Library Hardcover Collection",
+  "assets": [
+    {
+      "id": "poor-charlies-almanack",
+      "file": "/assets/mint/books/poor-charlies-almanack.glb"
+    },
+    {
+      "id": "maintenance-part-one",
+      "file": "/assets/mint/books/maintenance-part-one.glb"
+    },
+    {
+      "id": "origins-of-efficiency",
+      "file": "/assets/mint/books/origins-of-efficiency.glb"
+    },
+    {
+      "id": "scaling",
+      "file": "/assets/mint/books/scaling.glb"
+    },
+    {
+      "id": "boom",
+      "file": "/assets/mint/books/boom.glb"
+    },
+    {
+      "id": "scaling-people",
+      "file": "/assets/mint/books/scaling-people.glb"
+    },
+    {
+      "id": "pieces-of-the-action",
+      "file": "/assets/mint/books/pieces-of-the-action.glb"
+    },
+    {
+      "id": "where-is-my-flying-car",
+      "file": "/assets/mint/books/where-is-my-flying-car.glb"
+    },
+    {
+      "id": "the-big-score",
+      "file": "/assets/mint/books/the-big-score.glb"
+    },
+    {
+      "id": "scientific-freedom",
+      "file": "/assets/mint/books/scientific-freedom.glb"
+    },
+    {
+      "id": "working-in-public",
+      "file": "/assets/mint/books/working-in-public.glb"
+    },
+    {
+      "id": "the-art-of-doing-science-and-engineering",
+      "file": "/assets/mint/books/the-art-of-doing-science-and-engineering.glb"
+    },
+    {
+      "id": "the-making-of-prince-of-persia",
+      "file": "/assets/mint/books/the-making-of-prince-of-persia.glb"
+    },
+    {
+      "id": "get-together",
+      "file": "/assets/mint/books/get-together.glb"
+    },
+    {
+      "id": "an-elegant-puzzle",
+      "file": "/assets/mint/books/an-elegant-puzzle.glb"
+    },
+    {
+      "id": "the-revolt-of-the-public",
+      "file": "/assets/mint/books/the-revolt-of-the-public.glb"
+    },
+    {
+      "id": "stubborn-attachments",
+      "file": "/assets/mint/books/stubborn-attachments.glb"
+    },
+    {
+      "id": "the-dream-machine",
+      "file": "/assets/mint/books/the-dream-machine.glb"
+    },
+    {
+      "id": "high-growth-handbook",
+      "file": "/assets/mint/books/high-growth-handbook.glb"
+    }
+  ]
+}
