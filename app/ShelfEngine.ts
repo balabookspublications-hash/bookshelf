@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { CatalogBook } from "./catalog";
 import {
   bookFootprintsOverlap,
@@ -20,7 +21,6 @@ import {
   createBackCover,
   createFrontCover,
   createSpineCover,
-  createTitleDecal,
 } from "./cover-art";
 import {
   STRIPE_ASSET_ROOT,
@@ -53,7 +53,6 @@ type RuntimeBook = {
     THREE.PlaneGeometry,
     THREE.MeshPhysicalMaterial
   >;
-  titleDecal: THREE.Mesh;
   pickProxy: THREE.Mesh;
   livingMaterial?: THREE.ShaderMaterial;
   x: number;
@@ -91,6 +90,10 @@ const inspectionIdleRoll = THREE.MathUtils.degToRad(0.22);
 // and the front cover is on +X. Rotating -90° maps that cover to world +Z,
 // toward the browse camera.
 const stripeBookCoverFacingRotationY = -Math.PI / 2;
+
+// Raycast-only geometry lives here. The camera renders layer 0 exclusively, so
+// pick proxies keep their animated transforms without ever being drawn.
+const pickLayer = 1;
 
 function damp(current: number, target: number, lambda: number, delta: number) {
   return THREE.MathUtils.damp(current, target, lambda, delta);
@@ -164,6 +167,7 @@ export class ShelfEngine {
   private runtimeBooks: RuntimeBook[] = [];
   private pickTargets: THREE.Object3D[] = [];
   private raycaster = new THREE.Raycaster();
+  private hoverNeedsUpdate = false;
   private pointer = new THREE.Vector2(10, 10);
   private animationFrame = 0;
   private resizeObserver: ResizeObserver;
@@ -200,6 +204,10 @@ export class ShelfEngine {
   private focusCameraPosition = new THREE.Vector3();
   private focusCameraTarget = new THREE.Vector3();
   private responsiveBrowseCamera = browseCamera.clone();
+  private isCompactViewport = false;
+  private viewWidth = 1;
+  private viewHeight = 1;
+  private canvasRect: DOMRect | null = null;
   private lastTimestamp = 0;
   private lastDiagnosticsAt = 0;
   private isDisposed = false;
@@ -230,6 +238,8 @@ export class ShelfEngine {
     this.camera = new THREE.PerspectiveCamera(27, 1, 0.08, 80);
     this.camera.position.copy(browseCamera);
     this.camera.lookAt(browseTarget);
+    this.camera.layers.disable(pickLayer);
+    this.raycaster.layers.set(pickLayer);
 
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enabled = false;
@@ -432,21 +442,16 @@ export class ShelfEngine {
       metalness: 0,
     });
 
-    const pageBlock = new THREE.Mesh(
-      new RoundedBoxGeometry(
-        width - 0.075,
-        book.height - 0.105,
-        Math.max(0.08, depth - 0.052),
-        3,
-        0.018,
-      ),
-      paperMaterial,
+    // One mesh for every part that shares the same shadow flags. The material
+    // array keeps the paper block and the boards visually distinct while the
+    // whole body travels as a single culled, single-transform object.
+    const pageGeometry = new RoundedBoxGeometry(
+      width - 0.075,
+      book.height - 0.105,
+      Math.max(0.08, depth - 0.052),
+      3,
+      0.018,
     );
-    pageBlock.name = "pageBlock";
-    pageBlock.castShadow = true;
-    pageBlock.receiveShadow = true;
-    physical.add(pageBlock);
-
     const boardGeometry = new RoundedBoxGeometry(
       width,
       book.height,
@@ -454,20 +459,24 @@ export class ShelfEngine {
       4,
       0.025,
     );
-    const frontBoard = new THREE.Mesh(boardGeometry, boardMaterial);
-    frontBoard.name = "frontBoard";
-    frontBoard.position.z = depth * 0.5;
-    frontBoard.castShadow = true;
-    frontBoard.receiveShadow = true;
-    physical.add(frontBoard);
+    const boardsGeometry = mergeGeometries(
+      [
+        boardGeometry.clone().translate(0, 0, depth * 0.5),
+        boardGeometry.clone().translate(0, 0, -depth * 0.5),
+      ],
+      false,
+    );
+    boardGeometry.dispose();
+    const bodyGeometry = mergeGeometries([pageGeometry, boardsGeometry], true);
+    pageGeometry.dispose();
+    boardsGeometry.dispose();
+    const body = new THREE.Mesh(bodyGeometry, [paperMaterial, boardMaterial]);
+    body.name = "bookBody";
+    body.castShadow = true;
+    body.receiveShadow = true;
+    physical.add(body);
 
-    const backBoard = new THREE.Mesh(boardGeometry, boardMaterial);
-    backBoard.name = "backBoard";
-    backBoard.position.z = -depth * 0.5;
-    backBoard.castShadow = true;
-    backBoard.receiveShadow = true;
-    physical.add(backBoard);
-
+    // The spine casts but does not receive, so it stays its own mesh.
     const spine = new THREE.Mesh(
       new RoundedBoxGeometry(0.055, book.height - 0.01, depth + 0.012, 3, 0.018),
       boardMaterial,
@@ -482,20 +491,29 @@ export class ShelfEngine {
       roughness: 0.62,
       metalness: 0.2,
     });
-    const headbandGeometry = new THREE.CylinderGeometry(0.017, 0.017, width - 0.1, 10);
-    headbandGeometry.rotateZ(Math.PI / 2);
-    const headbandTop = new THREE.Mesh(headbandGeometry, headbandMaterial);
-    headbandTop.position.set(0, book.height * 0.5 - 0.045, 0);
-    physical.add(headbandTop);
-    const headbandBottom = headbandTop.clone();
-    headbandBottom.position.y = -book.height * 0.5 + 0.045;
-    physical.add(headbandBottom);
+    const headbandSource = new THREE.CylinderGeometry(
+      0.017,
+      0.017,
+      width - 0.1,
+      10,
+    );
+    headbandSource.rotateZ(Math.PI / 2);
+    const headbandGeometry = mergeGeometries(
+      [
+        headbandSource.clone().translate(0, book.height * 0.5 - 0.045, 0),
+        headbandSource.clone().translate(0, -book.height * 0.5 + 0.045, 0),
+      ],
+      false,
+    );
+    headbandSource.dispose();
+    const headbands = new THREE.Mesh(headbandGeometry, headbandMaterial);
+    headbands.name = "headbands";
+    physical.add(headbands);
 
     const frontTexture = toTexture(createFrontCover(book), this.renderer);
-    const titleTexture = toTexture(createTitleDecal(book), this.renderer);
     const spineTexture = toTexture(createSpineCover(book), this.renderer, 4);
     const backTexture = toTexture(createBackCover(book), this.renderer);
-    const textures = [frontTexture, titleTexture, spineTexture, backTexture];
+    const textures = [frontTexture, spineTexture, backTexture];
 
     const frontSurface = new THREE.Mesh<
       THREE.PlaneGeometry,
@@ -513,22 +531,6 @@ export class ShelfEngine {
     frontSurface.name = "frontArtwork";
     frontSurface.position.z = depth * 0.5 + 0.019;
     physical.add(frontSurface);
-
-    const titleDecal = new THREE.Mesh(
-      new THREE.PlaneGeometry(width - 0.065, book.height - 0.065),
-      new THREE.MeshBasicMaterial({
-        map: titleTexture,
-        transparent: true,
-        alphaTest: 0.02,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-      }),
-    );
-    titleDecal.name = "accurateTitleDecal";
-    titleDecal.position.z = depth * 0.5 + 0.026;
-    titleDecal.visible = false;
-    inspectionIdle.add(titleDecal);
 
     const backSurface = new THREE.Mesh(
       new THREE.PlaneGeometry(width - 0.065, book.height - 0.065),
@@ -567,16 +569,16 @@ export class ShelfEngine {
       inspectionIdle.add(shimmer);
     }
 
+    // The pick proxy only ever answers raycasts. Parking it on the pick layer
+    // keeps it parented — so it still inherits the animated transform — while
+    // the camera never renders it. `visible = false` would not work here: an
+    // invisible mesh is still submitted, and a raycast ignores the flag.
     const pickProxy = new THREE.Mesh(
       new THREE.BoxGeometry(width, book.height, depth + 0.07),
-      new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-      }),
     );
     pickProxy.name = `pick:${book.id}`;
     pickProxy.userData.bookIndex = index;
+    pickProxy.layers.set(pickLayer);
     inspectionIdle.add(pickProxy);
     this.pickTargets.push(pickProxy);
 
@@ -589,7 +591,6 @@ export class ShelfEngine {
       physical,
       assetHolder,
       frontSurface,
-      titleDecal,
       pickProxy,
       livingMaterial,
       x,
@@ -611,7 +612,14 @@ export class ShelfEngine {
     this.canvas.addEventListener("pointerleave", this.handlePointerLeave);
     this.canvas.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("blur", this.handleWindowBlur);
+    window.addEventListener("scroll", this.handleViewportShift, {
+      passive: true,
+    });
   }
+
+  private handleViewportShift = () => {
+    this.canvasRect = null;
+  };
 
   private handleWheel = (event: WheelEvent) => {
     if (this.mode !== "browse") return;
@@ -658,7 +666,7 @@ export class ShelfEngine {
       return;
     }
 
-    this.updateHover();
+    this.hoverNeedsUpdate = true;
   };
 
   private handlePointerUp = (event: PointerEvent) => {
@@ -729,9 +737,16 @@ export class ShelfEngine {
   };
 
   private updatePointer(event: PointerEvent) {
-    const rect = this.canvas.getBoundingClientRect();
+    // The rect is refreshed on resize and scroll rather than per event, so a
+    // fast pointer sweep no longer forces a layout on every move.
+    const rect = this.canvasRect ?? this.refreshCanvasRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  }
+
+  private refreshCanvasRect() {
+    this.canvasRect = this.canvas.getBoundingClientRect();
+    return this.canvasRect;
   }
 
   private raycastBook() {
@@ -742,12 +757,15 @@ export class ShelfEngine {
       : null;
   }
 
-  private updateHover() {
+  private applyHover() {
     const hit = this.raycastBook();
     this.runtimeBooks.forEach((book) => {
       book.targetHover = book.index === hit ? 1 : 0;
     });
-    this.canvas.style.cursor = hit === null ? "grab" : "pointer";
+    const cursor = hit === null ? "grab" : "pointer";
+    if (this.canvas.style.cursor !== cursor) {
+      this.canvas.style.cursor = cursor;
+    }
   }
 
   private xAtIndex(index: number) {
@@ -915,25 +933,25 @@ export class ShelfEngine {
     this.updateState(delta, timestamp);
     this.updateBooks(delta, elapsed);
 
+    // Hover raycasts collapse to at most one per frame. A fast pointer sweep
+    // fires far more pointermove events than there are frames to show them.
+    if (this.hoverNeedsUpdate) {
+      this.hoverNeedsUpdate = false;
+      this.applyHover();
+    }
+
     if (this.controls.enabled) this.controls.update();
     this.renderer.render(this.scene, this.camera);
     if (timestamp - this.lastDiagnosticsAt > 500) {
-      const diagnostics = this.getDiagnostics();
-      this.canvas.dataset.drawCalls = String(diagnostics.drawCalls);
-      this.canvas.dataset.triangles = String(diagnostics.triangles);
-      this.canvas.dataset.geometries = String(diagnostics.geometries);
-      this.canvas.dataset.textures = String(diagnostics.textures);
-      this.canvas.dataset.stripeAssets = String(
-        diagnostics.stripeAssetsLoaded,
-      );
-      this.canvas.dataset.pixelRatio = String(diagnostics.pixelRatio);
-      this.canvas.dataset.motionPhase = diagnostics.motionPhase;
-      this.canvas.dataset.collisionFree = String(
-        diagnostics.currentCollision === null,
-      );
-      this.canvas.dataset.collisionRejects = String(
-        diagnostics.collisionRejects,
-      );
+      const info = this.renderer.info;
+      this.canvas.dataset.drawCalls = String(info.render.calls);
+      this.canvas.dataset.triangles = String(info.render.triangles);
+      this.canvas.dataset.geometries = String(info.memory.geometries);
+      this.canvas.dataset.textures = String(info.memory.textures);
+      this.canvas.dataset.stripeAssets = String(this.assetCount);
+      this.canvas.dataset.pixelRatio = String(this.renderer.getPixelRatio());
+      this.canvas.dataset.motionPhase = this.browseMotionPhase;
+      this.canvas.dataset.collisionRejects = String(this.collisionRejects);
       this.lastDiagnosticsAt = timestamp;
     }
   };
@@ -1031,11 +1049,12 @@ export class ShelfEngine {
         : easeOutCubic(this.focusProgress);
     const isolated = this.selectedIndex !== null && motionFocus > 0.72;
     this.shelfFurniture.visible = !isolated;
-    const focusX = window.innerWidth < 760 ? 0 : desktopFocusX;
-    const focusZ =
-      window.innerWidth < 760 ? mobileFocusZ : desktopFocusZ;
-    const focusScale =
-      window.innerWidth < 760 ? mobileFocusScale : desktopFocusScale;
+    // Resolved on resize, not per frame: reading layout inside the loop can
+    // force a synchronous reflow.
+    const compact = this.isCompactViewport;
+    const focusX = compact ? 0 : desktopFocusX;
+    const focusZ = compact ? mobileFocusZ : desktopFocusZ;
+    const focusScale = compact ? mobileFocusScale : desktopFocusScale;
 
     if (this.selectedIndex !== null) {
       const selected = this.runtimeBooks[this.selectedIndex];
@@ -1109,8 +1128,8 @@ export class ShelfEngine {
   }
 
   private applyFocusViewOffset(progress: number) {
-    const width = Math.max(1, this.canvas.clientWidth);
-    const height = Math.max(1, this.canvas.clientHeight);
+    const width = this.viewWidth;
+    const height = this.viewHeight;
     const isMobile = width < 760;
     const detailWidth =
       width <= 1020
@@ -1148,7 +1167,7 @@ export class ShelfEngine {
     worldPosition: THREE.Vector3,
     compositionProgress = 1,
   ) {
-    const isMobile = this.canvas.clientWidth < 760;
+    const isMobile = this.viewWidth < 760;
     const focusDistance = isMobile ? 5.8 : 5.4;
     this.applyFocusViewOffset(compositionProgress);
 
@@ -1163,6 +1182,10 @@ export class ShelfEngine {
   private handleResize = () => {
     const width = Math.max(1, this.canvas.clientWidth);
     const height = Math.max(1, this.canvas.clientHeight);
+    this.viewWidth = width;
+    this.viewHeight = height;
+    this.isCompactViewport = window.innerWidth < 760;
+    this.canvasRect = null;
     const dprCap = width < 760 ? 1.5 : 1.75;
     this.responsiveBrowseCamera.set(
       0,
@@ -1367,7 +1390,6 @@ export class ShelfEngine {
 
       runtime.assetHolder.add(root);
       runtime.physical.visible = false;
-      runtime.titleDecal.visible = false;
       runtime.textures.forEach((texture) => texture.dispose());
       runtime.textures.length = 0;
       this.assetCount += 1;
@@ -1495,6 +1517,7 @@ export class ShelfEngine {
     this.canvas.removeEventListener("pointerleave", this.handlePointerLeave);
     this.canvas.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("blur", this.handleWindowBlur);
+    window.removeEventListener("scroll", this.handleViewportShift);
 
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;

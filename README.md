@@ -1,5 +1,21 @@
 # The Complete Shelf
 
+Fork of [mintdotgg/bookshelf](https://github.com/mintdotgg/bookshelf).
+
+This fork focuses on Three.js shelf renderer performance. Measured on a
+production build with 19 books (1280×720, median of 3 Playwright runs):
+
+| Metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Draw calls | 239 | 175 | **27% fewer** |
+| Geometries | 141 | 108 | **23% fewer** |
+| Triangles | 113,532 | 112,528 | **~1,000 fewer** |
+
+How: merged book body and headband meshes, raycast-only pick proxies on a
+non-rendered layer, coalesced hover raycasts, and cached viewport reads.
+
+---
+
 An independent Three.js editorial bookshelf. The included demo catalog features
 nineteen Stripe Press titles, while the application is designed to be forked
 and filled with books of your own.

@@ -36,9 +36,8 @@ scene
             └── inspectionIdle    centered, reduced-motion-aware idle motion
                 ├── physical      procedural boards, pages, spine, cover art
                 ├── assetHolder   optional imported edition mesh
-                ├── titleDecal    optional overlay for imported editions
                 ├── living shimmer optional animated shader plane
-                └── pickProxy     invisible, simple raycast geometry
+                └── pickProxy     raycast-only geometry, parked on layer 1
 ```
 
 The `slot` never participates in the book choreography. It anchors a volume to
@@ -63,9 +62,10 @@ so procedural and imported editions share the same centered idle motion.
    creating one giant motion step;
 2. advances the interaction state;
 3. updates selected-book and shader presentation;
-4. updates OrbitControls only while inspection is active;
-5. renders once;
-6. refreshes lightweight diagnostics twice per second.
+4. consumes at most one pending hover raycast;
+5. updates OrbitControls only while inspection is active;
+6. renders once;
+7. copies renderer counters into canvas data attributes twice per second.
 
 React does not receive per-frame positions. The engine only calls React when
 the active index, interaction mode, or status actually changes. This avoids a
@@ -232,10 +232,19 @@ engine remains authoritative; CSS simply presents the current mode.
 All browse inputs converge on `targetScrollIndex`, so wheel, drag, keyboard,
 and shelf ticks share one motion path.
 
-Raycasting uses one invisible box per book instead of every decorative mesh.
-The engine raycasts on pointer movement or click boundaries, not on every
-animation frame. A drag must stay under seven pixels to count as a click, which
-prevents an accidental inspection after swiping.
+Raycasting uses one box per book instead of every decorative mesh. That box
+lives on layer 1, which the camera does not render and the raycaster targets
+exclusively, so it keeps the animated transform of its parent without ever being
+drawn. Setting `visible = false` would not achieve this: an invisible mesh is
+still traversed and submitted to the renderer, while a raycast ignores the flag
+entirely.
+
+Hover raycasts are coalesced to at most one per frame. Pointer events set a
+flag; the frame loop consumes it. A fast pointer sweep fires many more
+`pointermove` events than there are frames to display, so casting per event is
+wasted work. The canvas bounding rect is cached and invalidated on resize and
+scroll rather than measured per event, since `getBoundingClientRect()` inside a
+pointer handler forces a synchronous layout.
 
 Selection is deferred until the requested book has completed the browse
 handoff and is actually presented. `pendingFocusIndex` records that intent.
@@ -246,10 +255,20 @@ through the row.
 
 - One renderer, scene, camera, animation loop, and ResizeObserver have one
   lifecycle owner.
+- Each book's page block and both boards are merged into a single two-group
+  mesh, and both headbands into one more. A book draws in 7 calls instead of
+  11, so the shelf costs roughly 133 rather than 209 draw calls.
 - Procedural cover canvases become mipmapped sRGB textures with capped
   anisotropy.
 - Optional edition textures are cached.
-- Raycasts use simple proxy boxes and an intentional pick list.
+- Raycasts use simple proxy boxes on a non-rendered layer, coalesced to one
+  cast per frame.
+- Viewport-derived values are resolved on resize, never inside the frame loop,
+  so no frame reads layout.
+- The O(n²) whole-shelf collision audit runs only when
+  `window.__PRESS_LIBRARY__.diagnostics()` is called. Canvas data attributes
+  mirror renderer counters directly, which is why they no longer include
+  `collisionFree`.
 - Device pixel ratio is capped at `1.75` on desktop and `1.5` on narrow
   screens.
 - Shadow maps use `2048²` on larger screens and `1024²` below 700 px.
