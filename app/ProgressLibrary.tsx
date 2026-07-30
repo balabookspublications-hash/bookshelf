@@ -20,7 +20,6 @@ export function ProgressLibrary() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<ShelfMode>("browse");
   const [ready, setReady] = useState(false);
-  const [status, setStatus] = useState("Preparing the complete catalog");
 
   const activeBook = catalog[activeIndex];
   const selectedBook = useMemo(
@@ -44,7 +43,6 @@ export function ProgressLibrary() {
           setMode(nextMode);
           setSelectedIndex(index);
         },
-        onStatus: setStatus,
         onReady: () => setReady(true),
       });
       engineRef.current = engine;
@@ -81,12 +79,6 @@ export function ProgressLibrary() {
           <span>{siteConfig.wordmark}</span>
           <span className="wordmark__divider" />
           <span>{siteConfig.collectionName}</span>
-        </div>
-        <div className="header-actions">
-          <div className="edition-mark">
-            <span>{catalog.length} VOLUMES</span>
-            <span>01 CONTINUOUS SHELF</span>
-          </div>
         </div>
       </header>
 
@@ -236,16 +228,6 @@ export function ProgressLibrary() {
           </div>
         ) : null}
       </aside>
-
-      <div
-        className="experience-status"
-        role="status"
-        aria-live="polite"
-        data-testid="experience-status"
-      >
-        <span className="experience-status__dot" />
-        <span>{status}</span>
-      </div>
 
       <div className="loading-screen" aria-hidden={ready}>
         <div className="loading-screen__mark">

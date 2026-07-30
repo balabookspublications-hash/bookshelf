@@ -130,24 +130,6 @@ canvas:focus-visible {
   opacity: 0.4;
 }
 
-.edition-mark {
-  display: grid;
-  gap: 5px;
-  justify-items: end;
-  color: var(--ink-soft);
-  font-size: 9px;
-  font-weight: 560;
-  letter-spacing: 0.17em;
-  line-height: 1;
-}
-
-.header-actions {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-  pointer-events: auto;
-}
-
 .browse-caption {
   position: absolute;
   z-index: 16;
@@ -669,35 +651,6 @@ canvas:focus-visible {
   text-transform: uppercase;
 }
 
-.experience-status {
-  position: absolute;
-  z-index: 18;
-  top: 72px;
-  left: clamp(24px, 3.4vw, 56px);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--ink-soft);
-  font-size: 8px;
-  font-weight: 560;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  transition: opacity 300ms ease;
-}
-
-.experience-status__dot {
-  display: block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #6c8b64;
-  box-shadow: 0 0 0 3px rgba(108, 139, 100, 0.13);
-}
-
-.is-focused .experience-status {
-  opacity: 0;
-}
-
 .loading-screen {
   position: absolute;
   z-index: 40;
@@ -827,23 +780,6 @@ canvas:focus-visible {
 
   .wordmark__divider {
     width: 14px;
-  }
-
-  .edition-mark {
-    display: none;
-  }
-
-  .header-actions {
-    gap: 0;
-  }
-
-  .experience-status {
-    top: 53px;
-    left: 18px;
-    max-width: 65vw;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
   }
 
   .browse-caption {

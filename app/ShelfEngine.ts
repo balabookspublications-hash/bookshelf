@@ -37,7 +37,7 @@ export type ShelfMode = "browse" | "focusing" | "inspect" | "returning";
 type ShelfCallbacks = {
   onActiveIndex: (index: number) => void;
   onMode: (mode: ShelfMode, selectedIndex: number | null) => void;
-  onStatus: (message: string) => void;
+  onStatus?: (message: string) => void;
   onReady: () => void;
 };
 
@@ -847,7 +847,7 @@ export class ShelfEngine {
       book.targetHover = 0;
     });
     this.callbacks.onMode(this.mode, index);
-    this.callbacks.onStatus(
+    this.callbacks.onStatus?.(
       `Opening ${this.runtimeBooks[index].data.shortTitle}`,
     );
   }
@@ -992,7 +992,7 @@ export class ShelfEngine {
         this.controls.target.copy(this.focusCameraTarget);
         this.callbacks.onMode(this.mode, this.selectedIndex);
         if (this.selectedIndex !== null) {
-          this.callbacks.onStatus(
+          this.callbacks.onStatus?.(
             `Inspecting ${this.runtimeBooks[this.selectedIndex].data.shortTitle}`,
           );
         }
@@ -1022,7 +1022,7 @@ export class ShelfEngine {
         this.selectedIndex = null;
         this.mode = "browse";
         this.callbacks.onMode(this.mode, null);
-        this.callbacks.onStatus(`${this.booksData.length} volumes ready`);
+        this.callbacks.onStatus?.(`${this.booksData.length} volumes ready`);
         this.canvas.focus({ preventScroll: true });
       }
     }
@@ -1212,7 +1212,7 @@ export class ShelfEngine {
 
   private async loadStripeAssets() {
     try {
-      this.callbacks.onStatus("Finishing the shelf");
+      this.callbacks.onStatus?.("Finishing the shelf");
       const [booksResponse, objResponse] = await Promise.all([
         fetch(`${STRIPE_ASSET_ROOT}/books.json`),
         fetch(`${STRIPE_ASSET_ROOT}/mesh/stripe-press-book.obj`),
@@ -1251,9 +1251,9 @@ export class ShelfEngine {
       await Promise.allSettled(
         bookAssets.map((bookAsset) => this.loadStripeBook(bookAsset)),
       );
-      this.callbacks.onStatus(`${this.booksData.length} volumes ready`);
+      this.callbacks.onStatus?.(`${this.booksData.length} volumes ready`);
     } catch {
-      this.callbacks.onStatus(`${this.booksData.length} volumes ready`);
+      this.callbacks.onStatus?.(`${this.booksData.length} volumes ready`);
     }
   }
 
@@ -1419,7 +1419,7 @@ export class ShelfEngine {
     this.activeIndex = next;
     this.pendingFocusIndex = next;
     this.callbacks.onActiveIndex(next);
-    this.callbacks.onStatus(
+    this.callbacks.onStatus?.(
       `Preparing ${this.runtimeBooks[next].data.shortTitle}`,
     );
     if (
@@ -1433,14 +1433,14 @@ export class ShelfEngine {
   returnToShelf() {
     if (this.mode === "browse" && this.pendingFocusIndex !== null) {
       this.pendingFocusIndex = null;
-      this.callbacks.onStatus("Opening cancelled");
+      this.callbacks.onStatus?.("Opening cancelled");
       return;
     }
     if (this.mode === "browse" || this.mode === "returning") return;
     this.controls.enabled = false;
     this.mode = "returning";
     this.callbacks.onMode(this.mode, this.selectedIndex);
-    this.callbacks.onStatus("Returning to the complete shelf");
+    this.callbacks.onStatus?.("Returning to the complete shelf");
   }
 
   resetFocusView() {

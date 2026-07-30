@@ -33,8 +33,6 @@ test("server-renders the complete editorial bookshelf shell", async () => {
     html,
     /<title>The Complete Shelf — An Interactive 3D Library<\/title>/i,
   );
-  assert.match(html, /19(?:<!-- -->)? VOLUMES/);
-  assert.match(html, /01 CONTINUOUS SHELF/);
   assert.match(html, /data-testid="shelf-canvas"/);
   assert.match(html, /data-testid="inspect-active"/);
   assert.match(html, /Poor Charlie’s Almanack/);
