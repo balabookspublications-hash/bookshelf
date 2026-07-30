@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { catalog } from "./catalog";
-import { ShelfEngine, type ShelfMode } from "./ShelfEngine";
+import type { ShelfMode } from "./ShelfEngine";
 import { siteConfig } from "./site-config";
 
 function ArrowIcon({ direction }: { direction: "left" | "right" }) {
@@ -15,7 +15,7 @@ function ArrowIcon({ direction }: { direction: "left" | "right" }) {
 
 export function ProgressLibrary() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const engineRef = useRef<ShelfEngine | null>(null);
+  const engineRef = useRef<import("./ShelfEngine").ShelfEngine | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<ShelfMode>("browse");
@@ -30,11 +30,14 @@ export function ProgressLibrary() {
 
   useEffect(() => {
     let cancelled = false;
-    let engine: ShelfEngine | null = null;
+    let engine: import("./ShelfEngine").ShelfEngine | null = null;
 
     async function start() {
       if (!canvasRef.current) return;
-      await document.fonts.ready;
+      const [{ ShelfEngine }] = await Promise.all([
+        import("./ShelfEngine"),
+        document.fonts.ready,
+      ]);
       if (cancelled || !canvasRef.current) return;
 
       engine = new ShelfEngine(canvasRef.current, catalog, {

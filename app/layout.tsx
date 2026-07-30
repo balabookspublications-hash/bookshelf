@@ -1,51 +1,41 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
 import "@fontsource-variable/newsreader";
 import "@fontsource-variable/inter";
 import "./globals.css";
 import { siteConfig } from "./site-config";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host =
-    requestHeaders.get("x-forwarded-host") ??
-    requestHeaders.get("host") ??
-    "localhost:3000";
-  const protocol =
-    requestHeaders.get("x-forwarded-proto") ??
-    (host.startsWith("localhost") ? "http" : "https");
-  const origin = `${protocol}://${host}`;
-  const { title, description } = siteConfig;
+const metadataBase = new URL(
+  process.env.NEXT_PUBLIC_SITE_URL ?? siteConfig.siteUrl,
+);
 
-  return {
-    metadataBase: new URL(origin),
-    title,
-    description,
-    applicationName: siteConfig.applicationName,
-    category: "books",
-    openGraph: {
-      title,
-      description,
-      type: "website",
-      siteName: siteConfig.applicationName,
-      images: [
-        {
-          url: `${origin}/social-card.webp`,
-          width: 1200,
-          height: 630,
-          alt: siteConfig.socialImageAlt,
-          type: "image/webp",
-        },
-      ],
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: [`${origin}/social-card.webp`],
-    },
-  };
-}
+export const metadata: Metadata = {
+  metadataBase,
+  title: siteConfig.title,
+  description: siteConfig.description,
+  applicationName: siteConfig.applicationName,
+  category: "books",
+  openGraph: {
+    title: siteConfig.title,
+    description: siteConfig.description,
+    type: "website",
+    siteName: siteConfig.applicationName,
+    images: [
+      {
+        url: "/social-card.webp",
+        width: 1200,
+        height: 630,
+        alt: siteConfig.socialImageAlt,
+        type: "image/webp",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: siteConfig.title,
+    description: siteConfig.description,
+    images: ["/social-card.webp"],
+  },
+};
 
 export const viewport: Viewport = {
   width: "device-width",

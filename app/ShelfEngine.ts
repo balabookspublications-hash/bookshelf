@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
-import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { CatalogBook } from "./catalog";
 import {
@@ -261,7 +260,7 @@ export class ShelfEngine {
     this.handleResize();
     this.callbacks.onReady();
     this.animate();
-    void this.loadStripeAssets();
+    this.scheduleStripeAssetLoad();
 
     (
       window as unknown as {
@@ -694,6 +693,8 @@ export class ShelfEngine {
 
   private handlePointerLeave = () => {
     if (!this.pointerDown) {
+      this.hoverNeedsUpdate = false;
+      this.pointer.set(10, 10);
       this.runtimeBooks.forEach((book) => {
         book.targetHover = 0;
       });
@@ -704,7 +705,12 @@ export class ShelfEngine {
   private handleWindowBlur = () => {
     this.pointerDown = false;
     this.pointerId = null;
+    this.hoverNeedsUpdate = false;
+    this.pointer.set(10, 10);
     this.canvas.classList.remove("is-dragging");
+    this.runtimeBooks.forEach((book) => {
+      book.targetHover = 0;
+    });
   };
 
   private handleKeyDown = (event: KeyboardEvent) => {
@@ -1210,10 +1216,22 @@ export class ShelfEngine {
     }
   };
 
+  private scheduleStripeAssetLoad() {
+    const run = () => {
+      void this.loadStripeAssets();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(run, { timeout: 5000 });
+      return;
+    }
+    window.setTimeout(run, 300);
+  }
+
   private async loadStripeAssets() {
     try {
       this.callbacks.onStatus?.("Finishing the shelf");
-      const [booksResponse, objResponse] = await Promise.all([
+      const [{ OBJLoader }, booksResponse, objResponse] = await Promise.all([
+        import("three/addons/loaders/OBJLoader.js"),
         fetch(`${STRIPE_ASSET_ROOT}/books.json`),
         fetch(`${STRIPE_ASSET_ROOT}/mesh/stripe-press-book.obj`),
       ]);

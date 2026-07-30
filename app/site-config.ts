@@ -14,4 +14,5 @@ export const siteConfig = {
     "The Complete Shelf, with tactile abstract hardcovers and one book pulled forward on a walnut shelf.",
   independentNote:
     "Independent open-source project. Not affiliated with or endorsed by Stripe.",
+  siteUrl: "https://github.com/GithubAnant/bookshelf",
 } as const;
