@@ -5,6 +5,8 @@ Fork of [mintdotgg/bookshelf](https://github.com/mintdotgg/bookshelf).
 This fork focuses on Three.js shelf renderer performance. Measured on a
 production build with 19 books (1280×720, median of 3 Playwright runs):
 
+### Runtime (GPU)
+
 | Metric | Before | After | Change |
 | --- | ---: | ---: | ---: |
 | Draw calls | 239 | 175 | **27% fewer** |
@@ -13,6 +15,18 @@ production build with 19 books (1280×720, median of 3 Playwright runs):
 
 How: merged book body and headband meshes, raycast-only pick proxies on a
 non-rendered layer, coalesced hover raycasts, and cached viewport reads.
+
+### Load path (JS)
+
+| Chunk | Before | After |
+| --- | ---: | ---: |
+| Initial client bundle | 616 KB (`ProgressLibrary`) | **16 KB** (`ProgressLibrary`) |
+| Three.js + engine | (bundled above) | 397 KB + 193 KB (lazy-loaded) |
+| Stripe OBJ loader | (bundled above) | 8 KB (idle-loaded, only if archive present) |
+
+How: dynamic `import()` for `ShelfEngine`, static page metadata (no per-request
+`headers()`), parallel font + engine fetch, and `requestIdleCallback` for optional
+stripe assets.
 
 ---
 
