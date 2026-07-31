@@ -23,6 +23,8 @@ async function loadHostingConfig(): Promise<HostingConfig> {
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+const useNitro =
+  process.env.NITRO_PRESET === "vercel" || process.env.VERCEL === "1";
 
 export default defineConfig(async () => {
   const { d1, r2 } = await loadHostingConfig();
@@ -54,20 +56,38 @@ export default defineConfig(async () => {
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
 
-  // Wrangler snapshots its log path while the Cloudflare plugin is imported.
-  const { cloudflare } = await import("@cloudflare/vite-plugin");
+  const plugins: NonNullable<
+    Awaited<ReturnType<typeof defineConfig>>["plugins"]
+  > = [vinext(), sites()];
+
+  let css: Awaited<ReturnType<typeof defineConfig>>["css"];
+
+  if (useNitro) {
+    const tailwindcss = (await import("@tailwindcss/vite")).default;
+    const { nitro } = await import("nitro/vite");
+    plugins.unshift(tailwindcss());
+    plugins.push(nitro());
+    css = {
+      postcss: {
+        plugins: [],
+      },
+    };
+  } else {
+    // Wrangler snapshots its log path while the Cloudflare plugin is imported.
+    const { cloudflare } = await import("@cloudflare/vite-plugin");
+    plugins.push(
+      cloudflare({
+        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+        config: localBindingConfig,
+      }),
+    );
+  }
 
   return {
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
-    plugins: [
-      vinext(),
-      sites(),
-      cloudflare({
-        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
-      }),
-    ],
+    plugins,
+    ...(css ? { css } : {}),
   };
 });

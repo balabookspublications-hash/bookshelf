@@ -5,7 +5,10 @@ import "./globals.css";
 import { siteConfig } from "./site-config";
 
 const metadataBase = new URL(
-  process.env.NEXT_PUBLIC_SITE_URL ?? siteConfig.siteUrl,
+  process.env.NEXT_PUBLIC_SITE_URL ??
+    (process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : siteConfig.siteUrl),
 );
 
 export const metadata: Metadata = {
