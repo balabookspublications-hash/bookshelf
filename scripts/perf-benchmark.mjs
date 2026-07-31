@@ -50,6 +50,7 @@ async function measureOnce(page) {
       frames: 0,
       frameTimes: [],
       lastFrame: performance.now(),
+      rendererInfo: null,
     };
 
     const observer = new MutationObserver(() => {
@@ -92,12 +93,20 @@ async function measureOnce(page) {
 
   const sample = await page.evaluate(() => {
     const perf = window.__PERF__;
-    const canvas = document.querySelector("canvas");
-    const diagnostics = window.__PRESS_LIBRARY__?.diagnostics?.() ?? null;
     const frameTimes = perf.frameTimes.slice(-180);
     const avgFrameMs =
       frameTimes.length > 0
         ? frameTimes.reduce((sum, value) => sum + value, 0) / frameTimes.length
+        : null;
+
+    const canvas = document.querySelector("canvas");
+    const rendererInfo =
+      canvas &&
+      typeof canvas.getContext === "function" &&
+      canvas.getContext("webgl2", { failIfMajorPerformanceCaveat: false })
+        ? {
+            pixelRatio: window.devicePixelRatio,
+          }
         : null;
 
     return {
@@ -111,25 +120,7 @@ async function measureOnce(page) {
               Math.floor(frameTimes.length * 0.95)
             ]
           : null,
-      canvas: canvas
-        ? {
-            drawCalls: canvas.dataset.drawCalls ?? null,
-            triangles: canvas.dataset.triangles ?? null,
-            geometries: canvas.dataset.geometries ?? null,
-            textures: canvas.dataset.textures ?? null,
-            pixelRatio: canvas.dataset.pixelRatio ?? null,
-          }
-        : null,
-      diagnostics: diagnostics
-        ? {
-            drawCalls: diagnostics.drawCalls,
-            triangles: diagnostics.triangles,
-            geometries: diagnostics.geometries,
-            textures: diagnostics.textures,
-            books: diagnostics.books,
-            pixelRatio: diagnostics.pixelRatio,
-          }
-        : null,
+      rendererInfo,
     };
   });
 
@@ -177,39 +168,10 @@ async function main() {
       timeToFirstFrameMs: pick("timeToFirstFrameMs"),
       avgFps: pick("avgFps"),
       p95FrameMs: pick("p95FrameMs"),
-      drawCalls: Number(
-        median(
-          runs.map(
-            (run) =>
-              Number(run.diagnostics?.drawCalls ?? run.canvas?.drawCalls ?? NaN),
-          ),
-        ),
-      ),
-      triangles: Number(
-        median(
-          runs.map(
-            (run) =>
-              Number(run.diagnostics?.triangles ?? run.canvas?.triangles ?? NaN),
-          ),
-        ),
-      ),
-      geometries: Number(
-        median(
-          runs.map(
-            (run) =>
-              Number(
-                run.diagnostics?.geometries ?? run.canvas?.geometries ?? NaN,
-              ),
-          ),
-        ),
-      ),
-      textures: Number(
-        median(
-          runs.map(
-            (run) =>
-              Number(run.diagnostics?.textures ?? run.canvas?.textures ?? NaN),
-          ),
-        ),
+      pixelRatio: median(
+        runs
+          .map((run) => run.rendererInfo?.pixelRatio ?? null)
+          .filter((value) => typeof value === "number" && Number.isFinite(value)),
       ),
     },
   };

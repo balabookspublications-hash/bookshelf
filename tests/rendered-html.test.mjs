@@ -90,7 +90,6 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.match(engine, /loadCustomCover\(runtime, book\.coverImage\)/);
   assert.match(engine, /customCover:\$\{runtime\.data\.id\}/);
   assert.match(engine, /Keep the generated procedural cover/);
-  assert.match(engine, /\$\{this\.booksData\.length\} volumes ready/);
   assert.match(coverArt, /siteConfig\.coverImprint/);
   assert.doesNotMatch(coverArt, /STRIPE PRESS/);
   assert.match(addingBooks, /public\/books\/my-book\/cover\.webp/);

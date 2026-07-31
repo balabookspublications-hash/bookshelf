@@ -36,7 +36,6 @@ export type ShelfMode = "browse" | "focusing" | "inspect" | "returning";
 type ShelfCallbacks = {
   onActiveIndex: (index: number) => void;
   onMode: (mode: ShelfMode, selectedIndex: number | null) => void;
-  onStatus?: (message: string) => void;
   onReady: () => void;
 };
 
@@ -208,7 +207,6 @@ export class ShelfEngine {
   private viewHeight = 1;
   private canvasRect: DOMRect | null = null;
   private lastTimestamp = 0;
-  private lastDiagnosticsAt = 0;
   private isDisposed = false;
 
   constructor(
@@ -261,22 +259,6 @@ export class ShelfEngine {
     this.callbacks.onReady();
     this.animate();
     this.scheduleStripeAssetLoad();
-
-    (
-      window as unknown as {
-        __PRESS_LIBRARY__?: {
-          diagnostics: () => ReturnType<ShelfEngine["getDiagnostics"]>;
-          focus: (index: number) => void;
-          browse: (index: number) => void;
-          returnToShelf: () => void;
-        };
-      }
-    ).__PRESS_LIBRARY__ = {
-      diagnostics: () => this.getDiagnostics(),
-      focus: (index) => this.focusBook(index),
-      browse: (index) => this.browseTo(index),
-      returnToShelf: () => this.returnToShelf(),
-    };
   }
 
   private setupScene() {
@@ -611,14 +593,7 @@ export class ShelfEngine {
     this.canvas.addEventListener("pointerleave", this.handlePointerLeave);
     this.canvas.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("blur", this.handleWindowBlur);
-    window.addEventListener("scroll", this.handleViewportShift, {
-      passive: true,
-    });
   }
-
-  private handleViewportShift = () => {
-    this.canvasRect = null;
-  };
 
   private handleWheel = (event: WheelEvent) => {
     if (this.mode !== "browse") return;
@@ -853,9 +828,6 @@ export class ShelfEngine {
       book.targetHover = 0;
     });
     this.callbacks.onMode(this.mode, index);
-    this.callbacks.onStatus?.(
-      `Opening ${this.runtimeBooks[index].data.shortTitle}`,
-    );
   }
 
   private updateBrowseMotion(delta: number) {
@@ -948,18 +920,6 @@ export class ShelfEngine {
 
     if (this.controls.enabled) this.controls.update();
     this.renderer.render(this.scene, this.camera);
-    if (timestamp - this.lastDiagnosticsAt > 500) {
-      const info = this.renderer.info;
-      this.canvas.dataset.drawCalls = String(info.render.calls);
-      this.canvas.dataset.triangles = String(info.render.triangles);
-      this.canvas.dataset.geometries = String(info.memory.geometries);
-      this.canvas.dataset.textures = String(info.memory.textures);
-      this.canvas.dataset.stripeAssets = String(this.assetCount);
-      this.canvas.dataset.pixelRatio = String(this.renderer.getPixelRatio());
-      this.canvas.dataset.motionPhase = this.browseMotionPhase;
-      this.canvas.dataset.collisionRejects = String(this.collisionRejects);
-      this.lastDiagnosticsAt = timestamp;
-    }
   };
 
   private updateState(delta: number, timestamp: number) {
@@ -997,11 +957,6 @@ export class ShelfEngine {
         this.controls.enabled = true;
         this.controls.target.copy(this.focusCameraTarget);
         this.callbacks.onMode(this.mode, this.selectedIndex);
-        if (this.selectedIndex !== null) {
-          this.callbacks.onStatus?.(
-            `Inspecting ${this.runtimeBooks[this.selectedIndex].data.shortTitle}`,
-          );
-        }
       }
     } else if (this.mode === "returning") {
       this.controls.enabled = false;
@@ -1028,7 +983,6 @@ export class ShelfEngine {
         this.selectedIndex = null;
         this.mode = "browse";
         this.callbacks.onMode(this.mode, null);
-        this.callbacks.onStatus?.(`${this.booksData.length} volumes ready`);
         this.canvas.focus({ preventScroll: true });
       }
     }
@@ -1229,7 +1183,6 @@ export class ShelfEngine {
 
   private async loadStripeAssets() {
     try {
-      this.callbacks.onStatus?.("Finishing the shelf");
       const [{ OBJLoader }, booksResponse, objResponse] = await Promise.all([
         import("three/addons/loaders/OBJLoader.js"),
         fetch(`${STRIPE_ASSET_ROOT}/books.json`),
@@ -1269,9 +1222,8 @@ export class ShelfEngine {
       await Promise.allSettled(
         bookAssets.map((bookAsset) => this.loadStripeBook(bookAsset)),
       );
-      this.callbacks.onStatus?.(`${this.booksData.length} volumes ready`);
     } catch {
-      this.callbacks.onStatus?.(`${this.booksData.length} volumes ready`);
+      // Stripe archive is optional; procedural covers remain in place.
     }
   }
 
@@ -1437,9 +1389,6 @@ export class ShelfEngine {
     this.activeIndex = next;
     this.pendingFocusIndex = next;
     this.callbacks.onActiveIndex(next);
-    this.callbacks.onStatus?.(
-      `Preparing ${this.runtimeBooks[next].data.shortTitle}`,
-    );
     if (
       this.browseMotionPhase === "idle" &&
       this.presentedIndex === next
@@ -1451,14 +1400,12 @@ export class ShelfEngine {
   returnToShelf() {
     if (this.mode === "browse" && this.pendingFocusIndex !== null) {
       this.pendingFocusIndex = null;
-      this.callbacks.onStatus?.("Opening cancelled");
       return;
     }
     if (this.mode === "browse" || this.mode === "returning") return;
     this.controls.enabled = false;
     this.mode = "returning";
     this.callbacks.onMode(this.mode, this.selectedIndex);
-    this.callbacks.onStatus?.("Returning to the complete shelf");
   }
 
   resetFocusView() {
@@ -1470,56 +1417,6 @@ export class ShelfEngine {
     this.controls.target.copy(this.focusCameraTarget);
     this.camera.position.copy(this.focusCameraPosition);
     this.controls.update();
-  }
-
-  private findAnyCollision(): [string, string] | null {
-    for (let leftIndex = 0; leftIndex < this.runtimeBooks.length; leftIndex += 1) {
-      const left = this.runtimeBooks[leftIndex];
-      for (
-        let rightIndex = leftIndex + 1;
-        rightIndex < this.runtimeBooks.length;
-        rightIndex += 1
-      ) {
-        const right = this.runtimeBooks[rightIndex];
-        if (
-          bookFootprintsOverlap(
-            this.footprintFor(left),
-            this.footprintFor(right),
-            this.motionLayout.collisionMargin,
-          )
-        ) {
-          return [left.data.id, right.data.id];
-        }
-      }
-    }
-    return null;
-  }
-
-  getDiagnostics() {
-    const info = this.renderer.info;
-    return {
-      mode: this.mode,
-      activeIndex: this.activeIndex,
-      selectedIndex: this.selectedIndex,
-      books: this.runtimeBooks.length,
-      stripeAssetsLoaded: this.assetCount,
-      stripeAssetFailures: this.assetFailures,
-      drawCalls: info.render.calls,
-      triangles: info.render.triangles,
-      geometries: info.memory.geometries,
-      textures: info.memory.textures,
-      pixelRatio: this.renderer.getPixelRatio(),
-      motionPhase: this.browseMotionPhase,
-      collisionRejects: this.collisionRejects,
-      lastCollisionPair: this.lastCollisionPair,
-      currentCollision: this.findAnyCollision(),
-      canvas: {
-        width: this.canvas.width,
-        height: this.canvas.height,
-        clientWidth: this.canvas.clientWidth,
-        clientHeight: this.canvas.clientHeight,
-      },
-    };
   }
 
   dispose() {
@@ -1535,7 +1432,6 @@ export class ShelfEngine {
     this.canvas.removeEventListener("pointerleave", this.handlePointerLeave);
     this.canvas.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("blur", this.handleWindowBlur);
-    window.removeEventListener("scroll", this.handleViewportShift);
 
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
@@ -1554,10 +1450,5 @@ export class ShelfEngine {
     this.stripeGeometry = null;
     this.stripeGeometrySize.set(0, 0, 0);
     this.renderer.dispose();
-    delete (
-      window as unknown as {
-        __PRESS_LIBRARY__?: unknown;
-      }
-    ).__PRESS_LIBRARY__;
   }
 }

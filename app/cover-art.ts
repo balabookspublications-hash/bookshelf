@@ -553,19 +553,6 @@ export function createFrontCover(book: CatalogBook) {
   return canvas;
 }
 
-export function createTitleDecal(book: CatalogBook) {
-  const logicalWidth = 1024;
-  const logicalHeight = 1536;
-  const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 768;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return canvas;
-  ctx.scale(0.5, 0.5);
-  drawCoverTypography(ctx, book, logicalWidth, logicalHeight, true);
-  return canvas;
-}
-
 export function createSpineCover(book: CatalogBook) {
   const logicalWidth = 256;
   const logicalHeight = 2048;
