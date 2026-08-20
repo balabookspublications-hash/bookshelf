@@ -105,7 +105,13 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.ok(focusDuration >= 0.35 && focusDuration <= 0.55);
   assert.ok(returnDuration >= 0.25 && returnDuration <= 0.45);
   assert.match(engine, /easeOutCubic\(this\.focusProgress\)/);
-  assert.match(engine, /const libraryColumns = 3/);
+  assert.match(engine, /const libraryColumns = 5/);
+  assert.match(engine, /const desktopLibraryWidthFill = 0\.9/);
+  assert.match(engine, /horizontalDistance/);
+  assert.match(engine, /compactBrowseCenterX/);
+  assert.match(engine, /const pageSize = this\.viewWidth < 360 \? 1 : 2/);
+  assert.match(styles, /@media \(max-width: 359px\)/);
+  assert.match(styles, /min-height: 52px/);
   assert.match(engine, /Math\.ceil\(this\.runtimeBooks\.length \/ visibleColumns\)/);
   assert.match(engine, /presentedBookPose\(this\.motionLayout\)/);
   assert.match(engine, /`libraryShelf:\$\{row\}`/);
@@ -120,7 +126,10 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.match(engine, /this\.controls\.target\.copy\(this\.focusCameraTarget\)/);
   assert.match(engine, /bookInspectionIdle:/);
   assert.match(engine, /Math\.max\(book\.hover, activeStrength\)/);
-  assert.match(engine, /emissiveIntensity = hoverStrength/);
+  assert.match(engine, /frameMaterial\.emissiveIntensity = hoverStrength/);
+  assert.match(engine, /new THREE\.MeshBasicMaterial\(\{/);
+  assert.match(engine, /toneMapped: false/);
+  assert.match(engine, /fog: false/);
   assert.doesNotMatch(engine, /inspectionIdleLift|inspectionIdlePitch/);
   assert.match(styles, /\.browse-caption::before/);
   assert.match(styles, /rgba\(18, 12, 10, 0\.82\)/);

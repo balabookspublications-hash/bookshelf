@@ -45,8 +45,9 @@ type RuntimeBook = {
   assetHolder: THREE.Group;
   frontSurface: THREE.Mesh<
     THREE.PlaneGeometry,
-    THREE.MeshPhysicalMaterial
+    THREE.MeshPhysicalMaterial | THREE.MeshBasicMaterial
   >;
+  frameMaterial: THREE.MeshPhysicalMaterial;
   pickProxy: THREE.Mesh;
   livingMaterial?: THREE.ShaderMaterial;
   x: number;
@@ -80,11 +81,12 @@ const mobileFocusZ = 1.52;
 const mobileFocusScale = 1.06;
 const hoverExtraction = 0.032;
 const hoverLift = 0.018;
-const libraryColumns = 3;
-const libraryColumnSpacing = 1.72;
+const libraryColumns = 5;
+const libraryColumnSpacing = 1.64;
 const libraryRowSpacing = 2.58;
-const librarySidePadding = 0.58;
-const compactLibraryScale = 0.46;
+const librarySidePadding = 0.48;
+const compactLibraryScale = 0.72;
+const desktopLibraryWidthFill = 0.9;
 
 // Downloaded Stripe OBJ basis: X = thickness, Y = up/height, Z = width,
 // and the front cover is on +X. Rotating -90° maps that cover to world +Z,
@@ -272,7 +274,7 @@ export class ShelfEngine {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.96;
+    this.renderer.toneMappingExposure = 1.08;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -309,7 +311,7 @@ export class ShelfEngine {
     this.scene.background = new THREE.Color("#17110e");
     this.scene.fog = new THREE.Fog("#17110e", 11, 27);
 
-    const hemisphere = new THREE.HemisphereLight("#f4dfb9", "#24140e", 1.35);
+    const hemisphere = new THREE.HemisphereLight("#f4dfb9", "#2d1a12", 1.7);
     this.scene.add(hemisphere);
 
     const key = new THREE.DirectionalLight("#ffdca4", 3.15);
@@ -328,9 +330,10 @@ export class ShelfEngine {
     key.shadow.bias = -0.0005;
     this.scene.add(key);
 
-    const coverFill = new THREE.DirectionalLight("#f7e8ce", 1.25);
-    coverFill.position.set(1.2, 2.6, 7.5);
-    this.scene.add(coverFill);
+    const coverFill = new THREE.DirectionalLight("#ffe9c7", 2.4);
+    coverFill.position.set(0, 4.2, 8.5);
+    coverFill.target.position.set(0, 3.6, 0);
+    this.scene.add(coverFill, coverFill.target);
 
     const rim = new THREE.DirectionalLight("#617a9a", 0.72);
     rim.position.set(5.5, 3.6, -4.5);
@@ -615,6 +618,8 @@ export class ShelfEngine {
       color: book.accent,
       roughness: 0.62,
       metalness: 0.2,
+      emissive: new THREE.Color(book.accent),
+      emissiveIntensity: 0,
     });
     const headbandSource = new THREE.CylinderGeometry(
       0.017,
@@ -647,10 +652,10 @@ export class ShelfEngine {
       new THREE.PlaneGeometry(width - 0.065, book.height - 0.065),
       new THREE.MeshPhysicalMaterial({
         map: frontTexture,
-        roughness: 0.72,
-        metalness: 0.01,
-        clearcoat: book.motif === "gather" ? 0.1 : 0.025,
-        clearcoatRoughness: 0.68,
+        roughness: 0.82,
+        metalness: 0,
+        clearcoat: book.motif === "gather" ? 0.06 : 0.015,
+        clearcoatRoughness: 0.78,
         emissive: new THREE.Color(book.accent),
         emissiveIntensity: 0,
       }),
@@ -718,6 +723,7 @@ export class ShelfEngine {
       physical,
       assetHolder,
       frontSurface,
+      frameMaterial: headbandMaterial,
       pickProxy,
       livingMaterial,
       x,
@@ -873,6 +879,30 @@ export class ShelfEngine {
   private refreshCanvasRect() {
     this.canvasRect = this.canvas.getBoundingClientRect();
     return this.canvasRect;
+  }
+
+  private compactBrowseScale() {
+    return this.viewWidth < 360 ? 0.78 : compactLibraryScale;
+  }
+
+  private compactBrowseCenterX(index: number) {
+    const rowStart = Math.floor(index / libraryColumns) * libraryColumns;
+    const rowEnd = Math.min(
+      rowStart + libraryColumns,
+      this.runtimeBooks.length,
+    );
+    const column = index - rowStart;
+    const pageSize = this.viewWidth < 360 ? 1 : 2;
+    const pageStart = Math.min(
+      rowStart + Math.floor(column / pageSize) * pageSize,
+      rowEnd - 1,
+    );
+    const pageEnd = Math.min(pageStart + pageSize - 1, rowEnd - 1);
+    return (
+      (this.runtimeBooks[pageStart].slot.position.x +
+        this.runtimeBooks[pageEnd].slot.position.x) /
+      2
+    );
   }
 
   private raycastBook() {
@@ -1067,10 +1097,20 @@ export class ShelfEngine {
       this.presentedIndex = nextActive;
       this.callbacks.onActiveIndex(this.activeIndex);
     }
-    this.shelfGroup.position.x = 0;
+    const targetLibraryX =
+      this.mode === "browse" && this.isCompactViewport
+        ? -this.compactBrowseCenterX(this.activeIndex) *
+          this.compactBrowseScale()
+        : 0;
+    this.shelfGroup.position.x = damp(
+      this.shelfGroup.position.x,
+      targetLibraryX,
+      this.reducedMotion ? 24 : 11,
+      delta,
+    );
     const targetLibraryScale =
       this.mode === "browse" && this.isCompactViewport
-        ? compactLibraryScale
+        ? this.compactBrowseScale()
         : 1;
     const nextLibraryScale = damp(
       this.shelfGroup.scale.x,
@@ -1134,7 +1174,7 @@ export class ShelfEngine {
         Math.cos(book.pose.yaw) * extraction,
       );
       book.inspectionIdle.rotation.set(0, 0, 0);
-      book.frontSurface.material.emissiveIntensity = hoverStrength * 0.055;
+      book.frameMaterial.emissiveIntensity = hoverStrength * 0.12;
 
       if (book.livingMaterial) {
         book.livingMaterial.uniforms.uTime.value = elapsed;
@@ -1234,13 +1274,21 @@ export class ShelfEngine {
     this.camera.aspect = width / height;
     this.camera.fov = width < 600 ? 33 : width < 920 ? 30 : 27;
     this.camera.updateProjectionMatrix();
-    const browseScale = width < 760 ? compactLibraryScale : 1;
+    const browseScale = width < 760 ? this.compactBrowseScale() : 1;
     const framedLibraryHeight =
       (2.35 + (this.libraryRows - 1) * libraryRowSpacing) * browseScale;
     const verticalDistance =
       (framedLibraryHeight * 1.08) /
       (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)));
-    const browseDistance = Math.max(width < 760 ? 9.5 : 7.1, verticalDistance);
+    const verticalHalfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
+    const horizontalDistance =
+      (this.libraryWidth * 1.04) /
+      (2 * Math.tan(verticalHalfFov) * this.camera.aspect * desktopLibraryWidthFill);
+    const browseDistance = Math.max(
+      width < 760 ? 9.5 : 7.1,
+      verticalDistance,
+      width < 760 ? 0 : horizontalDistance,
+    );
     this.responsiveBrowseTarget.set(
       0,
       this.libraryCenterY * browseScale,
@@ -1254,6 +1302,10 @@ export class ShelfEngine {
     if (this.mode === "browse" && this.focusProgress < 0.01) {
       this.camera.clearViewOffset();
       this.shelfGroup.scale.setScalar(browseScale);
+      this.shelfGroup.position.x =
+        width < 760
+          ? -this.compactBrowseCenterX(this.activeIndex) * browseScale
+          : 0;
       this.camera.position.copy(this.responsiveBrowseCamera);
       this.camera.lookAt(this.responsiveBrowseTarget);
     } else if (this.mode === "inspect" && this.selectedIndex !== null) {
@@ -1365,10 +1417,15 @@ export class ShelfEngine {
         this.renderer.capabilities.getMaxAnisotropy(),
       );
 
-      const material = runtime.frontSurface.material;
-      const proceduralTexture = material.map;
-      material.map = texture;
-      material.needsUpdate = true;
+      const previousMaterial = runtime.frontSurface.material;
+      const proceduralTexture = previousMaterial.map;
+      runtime.frontSurface.material = new THREE.MeshBasicMaterial({
+        map: texture,
+        color: "#ffffff",
+        toneMapped: false,
+        fog: false,
+      });
+      previousMaterial.dispose();
       runtime.textures.push(texture);
 
       if (proceduralTexture) {
