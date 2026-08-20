@@ -106,6 +106,11 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.ok(returnDuration >= 0.25 && returnDuration <= 0.45);
   assert.match(engine, /easeOutCubic\(this\.focusProgress\)/);
   assert.match(engine, /const libraryColumns = 5/);
+  assert.match(engine, /const booksPerSection = libraryColumns \* libraryRowsPerSection/);
+  assert.match(engine, /Math\.ceil\(this\.runtimeBooks\.length \/ booksPerSection\)/);
+  assert.match(engine, /sectionOffsetX/);
+  assert.match(engine, /ensureSectionCovers/);
+  assert.match(engine, /index < booksPerSection/);
   assert.match(engine, /const desktopLibraryWidthFill = 0\.9/);
   assert.match(engine, /horizontalDistance/);
   assert.match(engine, /compactBrowseCenterX/);
@@ -114,7 +119,7 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.match(styles, /min-height: 52px/);
   assert.match(engine, /Math\.ceil\(this\.runtimeBooks\.length \/ visibleColumns\)/);
   assert.match(engine, /presentedBookPose\(this\.motionLayout\)/);
-  assert.match(engine, /`libraryShelf:\$\{row\}`/);
+  assert.match(engine, /`libraryShelf:\$\{section\}:\$\{row\}`/);
   assert.match(engine, /commitBookPose\(/);
   assert.match(engine, /bookFootprintsOverlap\(/);
   assert.doesNotMatch(engine, /motionBookIndex|updateBrowseMotion/);

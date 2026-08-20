@@ -58,6 +58,8 @@ type RuntimeBook = {
   targetHover: number;
   idleAmount: number;
   textures: THREE.Texture[];
+  customCoverLoading: boolean;
+  customCoverLoaded: boolean;
 };
 
 const shelfTop = 0.34;
@@ -87,6 +89,9 @@ const libraryRowSpacing = 2.58;
 const librarySidePadding = 0.48;
 const compactLibraryScale = 0.72;
 const desktopLibraryWidthFill = 0.9;
+const libraryRowsPerSection = 2;
+const booksPerSection = libraryColumns * libraryRowsPerSection;
+const librarySectionGap = 1.4;
 
 // Downloaded Stripe OBJ basis: X = thickness, Y = up/height, Z = width,
 // and the front cover is on +X. Rotating -90° maps that cover to world +Z,
@@ -222,6 +227,8 @@ export class ShelfEngine {
   private libraryRows = 1;
   private libraryWidth = 1;
   private libraryCenterY = 1.4;
+  private librarySectionCount = 1;
+  private librarySectionSpacing = 1;
   private collisionRejects = 0;
   private lastCollisionPair: [string, string] | null = null;
   private scrollIndex = 0;
@@ -377,7 +384,7 @@ export class ShelfEngine {
       const runtime = this.createBook(book, index, 0);
       this.runtimeBooks.push(runtime);
       this.shelfGroup.add(runtime.slot);
-      if (book.coverImage) {
+      if (book.coverImage && index < booksPerSection) {
         void this.loadCustomCover(runtime, book.coverImage);
       }
     });
@@ -388,24 +395,40 @@ export class ShelfEngine {
     );
     this.libraryRows = Math.max(
       1,
-      Math.ceil(this.runtimeBooks.length / visibleColumns),
+      Math.min(
+        libraryRowsPerSection,
+        Math.ceil(this.runtimeBooks.length / visibleColumns),
+      ),
     );
     this.libraryWidth =
       (visibleColumns - 1) * libraryColumnSpacing +
       1.31 +
       librarySidePadding * 2;
+    this.librarySectionCount = Math.max(
+      1,
+      Math.ceil(this.runtimeBooks.length / booksPerSection),
+    );
+    this.librarySectionSpacing = this.libraryWidth + librarySectionGap;
     this.libraryCenterY =
       shelfTop + 1.08 + ((this.libraryRows - 1) * libraryRowSpacing) / 2;
 
     this.runtimeBooks.forEach((book, index) => {
-      const row = Math.floor(index / visibleColumns);
-      const rowStart = row * visibleColumns;
+      const section = Math.floor(index / booksPerSection);
+      const sectionStart = section * booksPerSection;
+      const indexInSection = index - sectionStart;
+      const row = Math.floor(indexInSection / visibleColumns);
+      const rowStart = sectionStart + row * visibleColumns;
       const booksInRow = Math.min(
         visibleColumns,
-        this.runtimeBooks.length - rowStart,
+        Math.min(
+          booksPerSection - row * visibleColumns,
+          this.runtimeBooks.length - rowStart,
+        ),
       );
       const column = index - rowStart;
-      const x = (column - (booksInRow - 1) / 2) * libraryColumnSpacing;
+      const x =
+        section * this.librarySectionSpacing +
+        (column - (booksInRow - 1) / 2) * libraryColumnSpacing;
       book.x = x;
       book.row = row;
       book.slot.position.set(
@@ -471,41 +494,19 @@ export class ShelfEngine {
       metalness: 0.68,
     });
 
-    for (let row = 0; row <= this.libraryRows; row += 1) {
-      const rowY = shelfTop + row * libraryRowSpacing;
-      const shelf = new THREE.Mesh(shelfGeometry, shelfMaterial);
-      shelf.name = row === this.libraryRows ? "libraryCrown" : `libraryShelf:${row}`;
-      shelf.position.set(0, rowY - 0.14, 0);
-      shelf.castShadow = true;
-      shelf.receiveShadow = true;
-      this.shelfFurniture.add(shelf);
-
-      const shelfEdge = new THREE.Mesh(shelfEdgeGeometry, shelfEdgeMaterial);
-      shelfEdge.name = `walnutShelfEdge:${row}`;
-      shelfEdge.position.set(0, rowY - 0.08, 0.85);
-      shelfEdge.castShadow = true;
-      this.shelfFurniture.add(shelfEdge);
-
-      const brassInlay = new THREE.Mesh(brassGeometry, brassMaterial);
-      brassInlay.name = `brassShelfInlay:${row}`;
-      brassInlay.position.set(0, rowY - 0.025, 0.94);
-      this.shelfFurniture.add(brassInlay);
-    }
-
     const cabinetHeight = this.libraryRows * libraryRowSpacing + 0.38;
-    const backPanel = new THREE.Mesh(
-      new RoundedBoxGeometry(this.libraryWidth, cabinetHeight, 0.1, 3, 0.025),
-      new THREE.MeshStandardMaterial({
-        color: navyColor,
-        roughness: 0.92,
-        metalness: 0,
-      }),
+    const backPanelGeometry = new RoundedBoxGeometry(
+      this.libraryWidth,
+      cabinetHeight,
+      0.1,
+      3,
+      0.025,
     );
-    backPanel.name = "navyShelfBacking";
-    backPanel.position.set(0, shelfTop + cabinetHeight * 0.5 - 0.15, -1.38);
-    backPanel.receiveShadow = true;
-    this.shelfFurniture.add(backPanel);
-
+    const backPanelMaterial = new THREE.MeshStandardMaterial({
+      color: navyColor,
+      roughness: 0.92,
+      metalness: 0,
+    });
     const uprightGeometry = new RoundedBoxGeometry(
       0.18,
       cabinetHeight,
@@ -513,17 +514,54 @@ export class ShelfEngine {
       3,
       0.035,
     );
-    for (const side of [-1, 1]) {
-      const upright = new THREE.Mesh(uprightGeometry, shelfMaterial);
-      upright.name = side < 0 ? "libraryUpright:left" : "libraryUpright:right";
-      upright.position.set(
-        side * (this.libraryWidth * 0.5 - 0.09),
+    for (let section = 0; section < this.librarySectionCount; section += 1) {
+      const sectionX = section * this.librarySectionSpacing;
+      for (let row = 0; row <= this.libraryRows; row += 1) {
+        const rowY = shelfTop + row * libraryRowSpacing;
+        const shelf = new THREE.Mesh(shelfGeometry, shelfMaterial);
+        shelf.name =
+          row === this.libraryRows
+            ? `libraryCrown:${section}`
+            : `libraryShelf:${section}:${row}`;
+        shelf.position.set(sectionX, rowY - 0.14, 0);
+        shelf.castShadow = true;
+        shelf.receiveShadow = true;
+        this.shelfFurniture.add(shelf);
+
+        const shelfEdge = new THREE.Mesh(shelfEdgeGeometry, shelfEdgeMaterial);
+        shelfEdge.name = `walnutShelfEdge:${section}:${row}`;
+        shelfEdge.position.set(sectionX, rowY - 0.08, 0.85);
+        shelfEdge.castShadow = true;
+        this.shelfFurniture.add(shelfEdge);
+
+        const brassInlay = new THREE.Mesh(brassGeometry, brassMaterial);
+        brassInlay.name = `brassShelfInlay:${section}:${row}`;
+        brassInlay.position.set(sectionX, rowY - 0.025, 0.94);
+        this.shelfFurniture.add(brassInlay);
+      }
+
+      const backPanel = new THREE.Mesh(backPanelGeometry, backPanelMaterial);
+      backPanel.name = `navyShelfBacking:${section}`;
+      backPanel.position.set(
+        sectionX,
         shelfTop + cabinetHeight * 0.5 - 0.15,
-        0,
+        -1.38,
       );
-      upright.castShadow = true;
-      upright.receiveShadow = true;
-      this.shelfFurniture.add(upright);
+      backPanel.receiveShadow = true;
+      this.shelfFurniture.add(backPanel);
+
+      for (const side of [-1, 1]) {
+        const upright = new THREE.Mesh(uprightGeometry, shelfMaterial);
+        upright.name = `libraryUpright:${section}:${side < 0 ? "left" : "right"}`;
+        upright.position.set(
+          sectionX + side * (this.libraryWidth * 0.5 - 0.09),
+          shelfTop + cabinetHeight * 0.5 - 0.15,
+          0,
+        );
+        upright.castShadow = true;
+        upright.receiveShadow = true;
+        this.shelfFurniture.add(upright);
+      }
     }
   }
 
@@ -734,6 +772,8 @@ export class ShelfEngine {
       targetHover: 0,
       idleAmount: 0,
       textures,
+      customCoverLoading: false,
+      customCoverLoaded: false,
     };
   }
 
@@ -883,6 +923,10 @@ export class ShelfEngine {
 
   private compactBrowseScale() {
     return this.viewWidth < 360 ? 0.78 : compactLibraryScale;
+  }
+
+  private sectionOffsetX(index: number) {
+    return Math.floor(index / booksPerSection) * this.librarySectionSpacing;
   }
 
   private compactBrowseCenterX(index: number) {
@@ -1095,13 +1139,14 @@ export class ShelfEngine {
     if (nextActive !== this.activeIndex) {
       this.activeIndex = nextActive;
       this.presentedIndex = nextActive;
+      this.ensureSectionCovers(nextActive);
       this.callbacks.onActiveIndex(this.activeIndex);
     }
     const targetLibraryX =
       this.mode === "browse" && this.isCompactViewport
         ? -this.compactBrowseCenterX(this.activeIndex) *
           this.compactBrowseScale()
-        : 0;
+        : -this.sectionOffsetX(this.selectedIndex ?? this.activeIndex);
     this.shelfGroup.position.x = damp(
       this.shelfGroup.position.x,
       targetLibraryX,
@@ -1137,7 +1182,10 @@ export class ShelfEngine {
 
     if (this.selectedIndex !== null) {
       const selected = this.runtimeBooks[this.selectedIndex];
-      const focusX = desiredFocusX - selected.slot.position.x;
+      const focusX =
+        (desiredFocusX - this.shelfGroup.position.x) /
+          this.shelfGroup.scale.x -
+        selected.slot.position.x;
       this.commitBookPose(
         selected,
         focusedBookPose(
@@ -1305,7 +1353,7 @@ export class ShelfEngine {
       this.shelfGroup.position.x =
         width < 760
           ? -this.compactBrowseCenterX(this.activeIndex) * browseScale
-          : 0;
+          : -this.sectionOffsetX(this.activeIndex);
       this.camera.position.copy(this.responsiveBrowseCamera);
       this.camera.lookAt(this.responsiveBrowseTarget);
     } else if (this.mode === "inspect" && this.selectedIndex !== null) {
@@ -1403,6 +1451,8 @@ export class ShelfEngine {
   }
 
   private async loadCustomCover(runtime: RuntimeBook, coverImage: string) {
+    if (runtime.customCoverLoading || runtime.customCoverLoaded) return;
+    runtime.customCoverLoading = true;
     try {
       const texture = await new THREE.TextureLoader().loadAsync(coverImage);
       if (this.isDisposed) {
@@ -1427,6 +1477,7 @@ export class ShelfEngine {
       });
       previousMaterial.dispose();
       runtime.textures.push(texture);
+      runtime.customCoverLoaded = true;
 
       if (proceduralTexture) {
         const index = runtime.textures.indexOf(proceduralTexture);
@@ -1436,6 +1487,22 @@ export class ShelfEngine {
     } catch {
       // Keep the generated procedural cover when an optional image is missing
       // or blocked by cross-origin policy.
+    } finally {
+      runtime.customCoverLoading = false;
+    }
+  }
+
+  private ensureSectionCovers(index: number) {
+    const sectionStart = Math.floor(index / booksPerSection) * booksPerSection;
+    const sectionEnd = Math.min(
+      sectionStart + booksPerSection,
+      this.runtimeBooks.length,
+    );
+    for (let bookIndex = sectionStart; bookIndex < sectionEnd; bookIndex += 1) {
+      const runtime = this.runtimeBooks[bookIndex];
+      if (runtime.data.coverImage) {
+        void this.loadCustomCover(runtime, runtime.data.coverImage);
+      }
     }
   }
 
@@ -1528,6 +1595,7 @@ export class ShelfEngine {
   browseTo(index: number) {
     if (this.mode !== "browse") return;
     const next = clamp(Math.round(index), 0, this.runtimeBooks.length - 1);
+    this.ensureSectionCovers(next);
     this.targetScrollIndex = next;
     this.lastInputTime = performance.now() - 1000;
   }
@@ -1535,6 +1603,7 @@ export class ShelfEngine {
   focusBook(index = this.activeIndex) {
     if (this.mode !== "browse") return;
     const next = clamp(Math.round(index), 0, this.runtimeBooks.length - 1);
+    this.ensureSectionCovers(next);
     this.targetScrollIndex = next;
     this.scrollIndex = next;
     this.activeIndex = next;
