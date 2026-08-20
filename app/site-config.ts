@@ -7,7 +7,7 @@ export const siteConfig = {
   collectionName: "THE BALA BOOKSHELF",
   editionEyebrow: "BALA BOOKS EDITION",
   coverImprint: "BALA BOOKS",
-  coverTagline: "BECAUSE SOME BOOKS MUST EXIST",
+  coverTagline: "Because Some Books Must Exist",
   spineMark: "BB",
   bookLinkLabel: "Buy book",
   socialImageAlt:

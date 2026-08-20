@@ -5,15 +5,11 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { CatalogBook } from "./catalog";
 import {
   bookFootprintsOverlap,
-  browseMotionPose,
-  browsePhaseDuration,
   createMotionLayout,
   focusedBookPose,
   presentedBookPose,
-  shelvedBookPose,
   type BookFootprint,
   type BookPose,
-  type BrowseMotionPhase,
   type MotionLayout,
 } from "./book-motion";
 import {
@@ -54,6 +50,7 @@ type RuntimeBook = {
   pickProxy: THREE.Mesh;
   livingMaterial?: THREE.ShaderMaterial;
   x: number;
+  row: number;
   width: number;
   pose: BookPose;
   hover: number;
@@ -65,8 +62,10 @@ type RuntimeBook = {
 const shelfTop = 0.34;
 const browseCamera = new THREE.Vector3(0, 1.42, 6.65);
 const browseTarget = new THREE.Vector3(0, 1.28, 0.15);
-const pageColor = new THREE.Color("#e9dfca");
-const shelfColor = new THREE.Color("#5a4132");
+const pageColor = new THREE.Color("#e8dcc4");
+const shelfColor = new THREE.Color("#ffffff");
+const brassColor = new THREE.Color("#b48736");
+const navyColor = new THREE.Color("#142437");
 const clamp = THREE.MathUtils.clamp;
 const focusInDuration = 0.46;
 const focusOutDuration = 0.34;
@@ -75,14 +74,17 @@ const compactDetailWidthRatio = 0.48;
 const desktopDetailMaxWidth = 620;
 const compactDetailMaxWidth = 570;
 const desktopFocusX = -0.58;
-const desktopFocusZ = 1.66;
-const desktopFocusScale = 1.08;
-const mobileFocusZ = 1.4;
-const mobileFocusScale = 0.92;
-const inspectionIdleLift = 0.014;
-const inspectionIdlePitch = THREE.MathUtils.degToRad(0.28);
-const inspectionIdleYaw = THREE.MathUtils.degToRad(0.48);
-const inspectionIdleRoll = THREE.MathUtils.degToRad(0.22);
+const desktopFocusZ = 1.82;
+const desktopFocusScale = 1.12;
+const mobileFocusZ = 1.52;
+const mobileFocusScale = 1.06;
+const hoverExtraction = 0.032;
+const hoverLift = 0.018;
+const libraryColumns = 3;
+const libraryColumnSpacing = 1.72;
+const libraryRowSpacing = 2.58;
+const librarySidePadding = 0.58;
+const compactLibraryScale = 0.46;
 
 // Downloaded Stripe OBJ basis: X = thickness, Y = up/height, Z = width,
 // and the front cover is on +X. Rotating -90° maps that cover to world +Z,
@@ -115,6 +117,47 @@ function toTexture(
   );
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
+  return texture;
+}
+
+function createWalnutTexture(renderer: THREE.WebGLRenderer) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 768;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#3a2118");
+  gradient.addColorStop(0.48, "#2c1711");
+  gradient.addColorStop(1, "#1f100c");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  // A small deterministic grain texture gives the shelf material identity
+  // without adding a downloaded asset or a unique texture per shelf piece.
+  for (let line = 0; line < 46; line += 1) {
+    const y = 4 + ((line * 29) % 119);
+    const amplitude = 1.2 + (line % 5) * 0.42;
+    context.beginPath();
+    for (let x = -12; x <= canvas.width + 12; x += 12) {
+      const wave = Math.sin(x * 0.021 + line * 1.73) * amplitude;
+      if (x === -12) context.moveTo(x, y + wave);
+      else context.lineTo(x, y + wave);
+    }
+    context.strokeStyle =
+      line % 4 === 0 ? "rgba(9, 4, 2, 0.2)" : "rgba(151, 92, 56, 0.08)";
+    context.lineWidth = line % 4 === 0 ? 1.2 : 0.7;
+    context.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.name = "sharedWalnutGrain";
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(5.5, 1);
+  texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
   return texture;
 }
 
@@ -173,11 +216,10 @@ export class ShelfEngine {
   private selectedIndex: number | null = null;
   private activeIndex = 0;
   private presentedIndex: number | null = 0;
-  private pendingFocusIndex: number | null = null;
-  private browseMotionPhase: BrowseMotionPhase | "idle" = "idle";
-  private browseMotionProgress = 0;
-  private motionBookIndex: number | null = null;
   private motionLayout: MotionLayout = createMotionLayout([]);
+  private libraryRows = 1;
+  private libraryWidth = 1;
+  private libraryCenterY = 1.4;
   private collisionRejects = 0;
   private lastCollisionPair: [string, string] | null = null;
   private scrollIndex = 0;
@@ -197,11 +239,13 @@ export class ShelfEngine {
     Promise<THREE.Texture | null>
   >();
   private stripeTextures = new Set<THREE.Texture>();
+  private environmentTextures = new Set<THREE.Texture>();
   private stripeGeometry: THREE.BufferGeometry | null = null;
   private stripeGeometrySize = new THREE.Vector3();
   private focusCameraPosition = new THREE.Vector3();
   private focusCameraTarget = new THREE.Vector3();
   private responsiveBrowseCamera = browseCamera.clone();
+  private responsiveBrowseTarget = browseTarget.clone();
   private isCompactViewport = false;
   private viewWidth = 1;
   private viewHeight = 1;
@@ -228,9 +272,9 @@ export class ShelfEngine {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.03;
+    this.renderer.toneMappingExposure = 0.96;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.camera = new THREE.PerspectiveCamera(27, 1, 0.08, 80);
     this.camera.position.copy(browseCamera);
@@ -262,14 +306,14 @@ export class ShelfEngine {
   }
 
   private setupScene() {
-    this.scene.background = new THREE.Color("#eee8db");
-    this.scene.fog = new THREE.Fog("#eee8db", 10, 26);
+    this.scene.background = new THREE.Color("#17110e");
+    this.scene.fog = new THREE.Fog("#17110e", 11, 27);
 
-    const hemisphere = new THREE.HemisphereLight("#fff8ea", "#6e5848", 2.4);
+    const hemisphere = new THREE.HemisphereLight("#f4dfb9", "#24140e", 1.35);
     this.scene.add(hemisphere);
 
-    const key = new THREE.DirectionalLight("#fff6e7", 4.6);
-    key.position.set(-4.2, 7.4, 5.5);
+    const key = new THREE.DirectionalLight("#ffdca4", 3.15);
+    key.position.set(-3.6, 8.4, 3.8);
     key.castShadow = true;
     key.shadow.mapSize.set(
       window.innerWidth < 700 ? 1024 : 2048,
@@ -284,18 +328,22 @@ export class ShelfEngine {
     key.shadow.bias = -0.0005;
     this.scene.add(key);
 
-    const rim = new THREE.DirectionalLight("#c8d5e5", 2.1);
-    rim.position.set(5, 3, -4);
+    const coverFill = new THREE.DirectionalLight("#f7e8ce", 1.25);
+    coverFill.position.set(1.2, 2.6, 7.5);
+    this.scene.add(coverFill);
+
+    const rim = new THREE.DirectionalLight("#617a9a", 0.72);
+    rim.position.set(5.5, 3.6, -4.5);
     this.scene.add(rim);
 
-    const warmBounce = new THREE.PointLight("#d79b72", 1.2, 10, 2);
-    warmBounce.position.set(-3, 0.4, 3.2);
+    const warmBounce = new THREE.PointLight("#c48752", 0.82, 9, 2);
+    warmBounce.position.set(-2.8, 0.25, 2.8);
     this.scene.add(warmBounce);
 
     const wall = new THREE.Mesh(
       new THREE.PlaneGeometry(34, 18),
       new THREE.MeshStandardMaterial({
-        color: "#eee8db",
+        color: "#1d1715",
         roughness: 1,
         metalness: 0,
       }),
@@ -307,7 +355,7 @@ export class ShelfEngine {
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(36, 18),
       new THREE.MeshStandardMaterial({
-        color: "#e7dfd0",
+        color: "#211713",
         roughness: 0.94,
         metalness: 0,
       }),
@@ -322,18 +370,46 @@ export class ShelfEngine {
   }
 
   private createBooks() {
-    let cursor = 0;
-    const gap = 0.045;
-
     this.booksData.forEach((book, index) => {
-      cursor += book.thickness * 0.5;
-      const runtime = this.createBook(book, index, cursor);
+      const runtime = this.createBook(book, index, 0);
       this.runtimeBooks.push(runtime);
       this.shelfGroup.add(runtime.slot);
       if (book.coverImage) {
         void this.loadCustomCover(runtime, book.coverImage);
       }
-      cursor += book.thickness * 0.5 + gap;
+    });
+
+    const visibleColumns = Math.min(
+      libraryColumns,
+      Math.max(1, this.runtimeBooks.length),
+    );
+    this.libraryRows = Math.max(
+      1,
+      Math.ceil(this.runtimeBooks.length / visibleColumns),
+    );
+    this.libraryWidth =
+      (visibleColumns - 1) * libraryColumnSpacing +
+      1.31 +
+      librarySidePadding * 2;
+    this.libraryCenterY =
+      shelfTop + 1.08 + ((this.libraryRows - 1) * libraryRowSpacing) / 2;
+
+    this.runtimeBooks.forEach((book, index) => {
+      const row = Math.floor(index / visibleColumns);
+      const rowStart = row * visibleColumns;
+      const booksInRow = Math.min(
+        visibleColumns,
+        this.runtimeBooks.length - rowStart,
+      );
+      const column = index - rowStart;
+      const x = (column - (booksInRow - 1) / 2) * libraryColumnSpacing;
+      book.x = x;
+      book.row = row;
+      book.slot.position.set(
+        x,
+        shelfTop + row * libraryRowSpacing + book.data.height * 0.5,
+        0.04,
+      );
     });
 
     this.motionLayout = createMotionLayout(
@@ -342,42 +418,110 @@ export class ShelfEngine {
         thickness: book.data.thickness,
       })),
     );
-    this.runtimeBooks.forEach((book, index) => {
+    this.runtimeBooks.forEach((book) => {
       this.commitBookPose(
         book,
-        index === 0
-          ? presentedBookPose(this.motionLayout)
-          : shelvedBookPose(this.motionLayout),
+        presentedBookPose(this.motionLayout),
         false,
       );
     });
 
-    const shelfWidth = cursor + 8;
-    const shelfGeometry = new RoundedBoxGeometry(shelfWidth, 0.22, 1.72, 4, 0.045);
+    const walnutTexture = createWalnutTexture(this.renderer);
+    if (walnutTexture) this.environmentTextures.add(walnutTexture);
+    const shelfGeometry = new RoundedBoxGeometry(
+      this.libraryWidth,
+      0.22,
+      1.72,
+      4,
+      0.045,
+    );
+    const shelfEdgeGeometry = new RoundedBoxGeometry(
+      this.libraryWidth,
+      0.12,
+      0.16,
+      3,
+      0.025,
+    );
+    const brassGeometry = new RoundedBoxGeometry(
+      this.libraryWidth - 0.18,
+      0.024,
+      0.028,
+      2,
+      0.008,
+    );
     const shelfMaterial = new THREE.MeshStandardMaterial({
       color: shelfColor,
-      roughness: 0.62,
-      metalness: 0.03,
+      map: walnutTexture,
+      roughness: 0.7,
+      metalness: 0.02,
     });
-    const shelf = new THREE.Mesh(shelfGeometry, shelfMaterial);
-    shelf.name = "continuousShelf";
-    shelf.position.set(cursor * 0.5, shelfTop - 0.14, 0);
-    shelf.castShadow = true;
-    shelf.receiveShadow = true;
-    this.shelfFurniture.add(shelf);
+    const shelfEdgeMaterial = new THREE.MeshPhysicalMaterial({
+      color: "#c2a28d",
+      map: walnutTexture,
+      roughness: 0.58,
+      clearcoat: 0.08,
+      clearcoatRoughness: 0.62,
+    });
+    const brassMaterial = new THREE.MeshStandardMaterial({
+      color: brassColor,
+      roughness: 0.46,
+      metalness: 0.68,
+    });
 
-    const shelfEdge = new THREE.Mesh(
-      new RoundedBoxGeometry(shelfWidth, 0.12, 0.16, 3, 0.025),
-      new THREE.MeshPhysicalMaterial({
-        color: "#4b3429",
-        roughness: 0.46,
-        clearcoat: 0.14,
-        clearcoatRoughness: 0.5,
+    for (let row = 0; row <= this.libraryRows; row += 1) {
+      const rowY = shelfTop + row * libraryRowSpacing;
+      const shelf = new THREE.Mesh(shelfGeometry, shelfMaterial);
+      shelf.name = row === this.libraryRows ? "libraryCrown" : `libraryShelf:${row}`;
+      shelf.position.set(0, rowY - 0.14, 0);
+      shelf.castShadow = true;
+      shelf.receiveShadow = true;
+      this.shelfFurniture.add(shelf);
+
+      const shelfEdge = new THREE.Mesh(shelfEdgeGeometry, shelfEdgeMaterial);
+      shelfEdge.name = `walnutShelfEdge:${row}`;
+      shelfEdge.position.set(0, rowY - 0.08, 0.85);
+      shelfEdge.castShadow = true;
+      this.shelfFurniture.add(shelfEdge);
+
+      const brassInlay = new THREE.Mesh(brassGeometry, brassMaterial);
+      brassInlay.name = `brassShelfInlay:${row}`;
+      brassInlay.position.set(0, rowY - 0.025, 0.94);
+      this.shelfFurniture.add(brassInlay);
+    }
+
+    const cabinetHeight = this.libraryRows * libraryRowSpacing + 0.38;
+    const backPanel = new THREE.Mesh(
+      new RoundedBoxGeometry(this.libraryWidth, cabinetHeight, 0.1, 3, 0.025),
+      new THREE.MeshStandardMaterial({
+        color: navyColor,
+        roughness: 0.92,
+        metalness: 0,
       }),
     );
-    shelfEdge.position.set(cursor * 0.5, shelfTop - 0.08, 0.85);
-    shelfEdge.castShadow = true;
-    this.shelfFurniture.add(shelfEdge);
+    backPanel.name = "navyShelfBacking";
+    backPanel.position.set(0, shelfTop + cabinetHeight * 0.5 - 0.15, -1.38);
+    backPanel.receiveShadow = true;
+    this.shelfFurniture.add(backPanel);
+
+    const uprightGeometry = new RoundedBoxGeometry(
+      0.18,
+      cabinetHeight,
+      1.82,
+      3,
+      0.035,
+    );
+    for (const side of [-1, 1]) {
+      const upright = new THREE.Mesh(uprightGeometry, shelfMaterial);
+      upright.name = side < 0 ? "libraryUpright:left" : "libraryUpright:right";
+      upright.position.set(
+        side * (this.libraryWidth * 0.5 - 0.09),
+        shelfTop + cabinetHeight * 0.5 - 0.15,
+        0,
+      );
+      upright.castShadow = true;
+      upright.receiveShadow = true;
+      this.shelfFurniture.add(upright);
+    }
   }
 
   private createBook(book: CatalogBook, index: number, x: number): RuntimeBook {
@@ -390,7 +534,7 @@ export class ShelfEngine {
     const content = new THREE.Group();
     content.name = `bookPresentation:${book.id}`;
     slot.add(content);
-    const pose = shelvedBookPose(this.motionLayout);
+    const pose = presentedBookPose(this.motionLayout);
     content.position.set(pose.x, 0, pose.z);
     content.rotation.y = pose.yaw;
     content.scale.setScalar(pose.scale);
@@ -503,10 +647,12 @@ export class ShelfEngine {
       new THREE.PlaneGeometry(width - 0.065, book.height - 0.065),
       new THREE.MeshPhysicalMaterial({
         map: frontTexture,
-        roughness: 0.66,
-        metalness: 0.02,
-        clearcoat: book.motif === "gather" ? 0.18 : 0.05,
-        clearcoatRoughness: 0.48,
+        roughness: 0.72,
+        metalness: 0.01,
+        clearcoat: book.motif === "gather" ? 0.1 : 0.025,
+        clearcoatRoughness: 0.68,
+        emissive: new THREE.Color(book.accent),
+        emissiveIntensity: 0,
       }),
     );
     frontSurface.name = "frontArtwork";
@@ -575,6 +721,7 @@ export class ShelfEngine {
       pickProxy,
       livingMaterial,
       x,
+      row: 0,
       width,
       pose,
       hover: 0,
@@ -598,7 +745,6 @@ export class ShelfEngine {
   private handleWheel = (event: WheelEvent) => {
     if (this.mode !== "browse") return;
     event.preventDefault();
-    this.pendingFocusIndex = null;
     const dominant =
       Math.abs(event.deltaX) > Math.abs(event.deltaY)
         ? event.deltaX
@@ -626,7 +772,6 @@ export class ShelfEngine {
     if (this.mode !== "browse") return;
 
     if (this.pointerDown && event.pointerId === this.pointerId) {
-      this.pendingFocusIndex = null;
       const delta = event.clientX - this.pointerLastX;
       this.pointerLastX = event.clientX;
       this.pointerTravel += Math.abs(delta);
@@ -749,17 +894,6 @@ export class ShelfEngine {
     }
   }
 
-  private xAtIndex(index: number) {
-    const lower = Math.floor(index);
-    const upper = Math.min(this.runtimeBooks.length - 1, Math.ceil(index));
-    const fraction = index - lower;
-    return THREE.MathUtils.lerp(
-      this.runtimeBooks[lower]?.x ?? 0,
-      this.runtimeBooks[upper]?.x ?? 0,
-      fraction,
-    );
-  }
-
   private footprintFor(
     book: RuntimeBook,
     pose: BookPose = book.pose,
@@ -779,13 +913,26 @@ export class ShelfEngine {
     const proposed = this.footprintFor(book, pose);
     return (
       this.runtimeBooks.find(
-        (other) =>
-          other !== book &&
-          bookFootprintsOverlap(
+        (other) => {
+          if (other === book) return false;
+          const bookCenterY = book.slot.position.y + book.content.position.y;
+          const otherCenterY = other.slot.position.y + other.content.position.y;
+          const minimumVerticalDistance =
+            (book.data.height * pose.scale +
+              other.data.height * other.pose.scale) *
+              0.5 +
+            this.motionLayout.collisionMargin;
+          if (
+            Math.abs(bookCenterY - otherCenterY) >= minimumVerticalDistance
+          ) {
+            return false;
+          }
+          return bookFootprintsOverlap(
             proposed,
             this.footprintFor(other),
             this.motionLayout.collisionMargin,
-          ),
+          );
+        },
       ) ?? null
     );
   }
@@ -813,14 +960,7 @@ export class ShelfEngine {
   }
 
   private beginFocus(index: number) {
-    if (
-      this.mode !== "browse" ||
-      this.browseMotionPhase !== "idle" ||
-      this.presentedIndex !== index
-    ) {
-      return;
-    }
-    this.pendingFocusIndex = null;
+    if (this.mode !== "browse") return;
     this.selectedIndex = index;
     this.focusProgress = 0;
     this.mode = "focusing";
@@ -828,76 +968,6 @@ export class ShelfEngine {
       book.targetHover = 0;
     });
     this.callbacks.onMode(this.mode, index);
-  }
-
-  private updateBrowseMotion(delta: number) {
-    if (this.browseMotionPhase === "idle") {
-      if (this.presentedIndex === this.activeIndex) {
-        if (this.pendingFocusIndex === this.activeIndex) {
-          this.beginFocus(this.activeIndex);
-        }
-        return;
-      }
-
-      this.motionBookIndex = this.presentedIndex;
-      this.browseMotionPhase =
-        this.motionBookIndex === null ? "extract-next" : "retreat-current";
-      if (this.motionBookIndex === null) {
-        this.motionBookIndex = this.activeIndex;
-      }
-      this.browseMotionProgress = 0;
-    }
-
-    const phase = this.browseMotionPhase;
-    const motionIndex = this.motionBookIndex;
-    if (motionIndex === null) return;
-    const duration = this.reducedMotion
-      ? Math.max(0.055, browsePhaseDuration[phase] * 0.45)
-      : browsePhaseDuration[phase];
-    const nextProgress = clamp(
-      this.browseMotionProgress + delta / duration,
-      0,
-      1,
-    );
-    const movingBook = this.runtimeBooks[motionIndex];
-    const proposedPose = browseMotionPose(
-      phase,
-      nextProgress,
-      this.motionLayout,
-    );
-    if (!this.commitBookPose(movingBook, proposedPose)) return;
-
-    this.browseMotionProgress = nextProgress;
-    if (nextProgress < 1) return;
-
-    this.browseMotionProgress = 0;
-    switch (phase) {
-      case "retreat-current":
-        this.browseMotionPhase = "turn-current";
-        break;
-      case "turn-current":
-        this.browseMotionPhase = "shelve-current";
-        break;
-      case "shelve-current":
-        this.presentedIndex = null;
-        this.motionBookIndex = this.activeIndex;
-        this.browseMotionPhase = "extract-next";
-        break;
-      case "extract-next":
-        this.browseMotionPhase = "turn-next";
-        break;
-      case "turn-next":
-        this.browseMotionPhase = "settle-next";
-        break;
-      case "settle-next":
-        this.presentedIndex = motionIndex;
-        this.motionBookIndex = null;
-        this.browseMotionPhase = "idle";
-        if (this.pendingFocusIndex === this.presentedIndex) {
-          this.beginFocus(this.presentedIndex);
-        }
-        break;
-    }
   }
 
   private animate = () => {
@@ -943,7 +1013,7 @@ export class ShelfEngine {
         this.responsiveBrowseCamera,
         1 - Math.exp(-(this.reducedMotion ? 18 : 7) * delta),
       );
-      this.camera.lookAt(browseTarget);
+      this.camera.lookAt(this.responsiveBrowseTarget);
     } else if (this.mode === "focusing") {
       this.focusProgress = clamp(
         this.focusProgress +
@@ -971,7 +1041,7 @@ export class ShelfEngine {
         this.responsiveBrowseCamera,
         1 - Math.exp(-(this.reducedMotion ? 24 : 14) * delta),
       );
-      this.camera.lookAt(browseTarget);
+      this.camera.lookAt(this.responsiveBrowseTarget);
       if (this.focusProgress <= 0) {
         if (this.selectedIndex !== null) {
           this.commitBookPose(
@@ -994,12 +1064,21 @@ export class ShelfEngine {
     );
     if (nextActive !== this.activeIndex) {
       this.activeIndex = nextActive;
+      this.presentedIndex = nextActive;
       this.callbacks.onActiveIndex(this.activeIndex);
     }
-    this.shelfGroup.position.x = -this.xAtIndex(this.scrollIndex);
-    if (this.mode === "browse") {
-      this.updateBrowseMotion(delta);
-    }
+    this.shelfGroup.position.x = 0;
+    const targetLibraryScale =
+      this.mode === "browse" && this.isCompactViewport
+        ? compactLibraryScale
+        : 1;
+    const nextLibraryScale = damp(
+      this.shelfGroup.scale.x,
+      targetLibraryScale,
+      this.reducedMotion ? 24 : 11,
+      delta,
+    );
+    this.shelfGroup.scale.setScalar(nextLibraryScale);
   }
 
   private updateBooks(delta: number, elapsed: number) {
@@ -1012,12 +1091,13 @@ export class ShelfEngine {
     // Resolved on resize, not per frame: reading layout inside the loop can
     // force a synchronous reflow.
     const compact = this.isCompactViewport;
-    const focusX = compact ? 0 : desktopFocusX;
+    const desiredFocusX = compact ? 0 : desktopFocusX;
     const focusZ = compact ? mobileFocusZ : desktopFocusZ;
     const focusScale = compact ? mobileFocusScale : desktopFocusScale;
 
     if (this.selectedIndex !== null) {
       const selected = this.runtimeBooks[this.selectedIndex];
+      const focusX = desiredFocusX - selected.slot.position.x;
       this.commitBookPose(
         selected,
         focusedBookPose(
@@ -1035,24 +1115,26 @@ export class ShelfEngine {
 
       const isSelected = book.index === this.selectedIndex;
       book.content.visible = !isolated || isSelected;
-      book.content.position.y = isSelected ? motionFocus * 0.04 : 0;
-
-      const idleTarget =
-        isSelected && this.mode === "inspect" && !this.reducedMotion ? 1 : 0;
-      book.idleAmount = damp(book.idleAmount, idleTarget, 5, delta);
-      const idleStrength = isSelected ? book.idleAmount : 0;
-      const idlePhase = elapsed * 0.78 + book.index * 0.37;
-      book.inspectionIdle.position.y =
-        Math.sin(idlePhase) * inspectionIdleLift * idleStrength;
-      book.inspectionIdle.rotation.set(
-        Math.sin(idlePhase * 0.73 + 0.8) *
-          inspectionIdlePitch *
-          idleStrength,
-        Math.sin(idlePhase * 0.61) * inspectionIdleYaw * idleStrength,
-        Math.sin(idlePhase * 0.89 + 1.7) *
-          inspectionIdleRoll *
-          idleStrength,
+      const verticalFocusProgress = easeOutCubic(
+        clamp((motionFocus - 0.55) / 0.45, 0, 1),
       );
+      const focusYOffset =
+        shelfTop + book.data.height * 0.5 - book.slot.position.y;
+      book.content.position.y = isSelected
+        ? focusYOffset * verticalFocusProgress + motionFocus * 0.04
+        : 0;
+
+      const activeStrength = book.index === this.activeIndex ? 0.22 : 0;
+      const hoverStrength =
+        this.mode === "browse" ? Math.max(book.hover, activeStrength) : 0;
+      const extraction = hoverStrength * hoverExtraction;
+      book.inspectionIdle.position.set(
+        -Math.sin(book.pose.yaw) * extraction,
+        hoverStrength * hoverLift,
+        Math.cos(book.pose.yaw) * extraction,
+      );
+      book.inspectionIdle.rotation.set(0, 0, 0);
+      book.frontSurface.material.emissiveIntensity = hoverStrength * 0.055;
 
       if (book.livingMaterial) {
         book.livingMaterial.uniforms.uTime.value = elapsed;
@@ -1095,7 +1177,7 @@ export class ShelfEngine {
       width <= 1020
         ? Math.min(compactDetailMaxWidth, width * compactDetailWidthRatio)
         : Math.min(desktopDetailMaxWidth, width * desktopDetailWidthRatio);
-    const focusDistance = isMobile ? 5.8 : 5.4;
+    const focusDistance = isMobile ? 6.25 : 5.4;
     const verticalHalfSpan =
       Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)) * focusDistance;
     const clampedProgress = clamp(progress, 0, 1);
@@ -1128,7 +1210,7 @@ export class ShelfEngine {
     compositionProgress = 1,
   ) {
     const isMobile = this.viewWidth < 760;
-    const focusDistance = isMobile ? 5.8 : 5.4;
+    const focusDistance = isMobile ? 6.25 : 5.4;
     this.applyFocusViewOffset(compositionProgress);
 
     this.focusCameraTarget.copy(worldPosition);
@@ -1147,20 +1229,33 @@ export class ShelfEngine {
     this.isCompactViewport = window.innerWidth < 760;
     this.canvasRect = null;
     const dprCap = width < 760 ? 1.5 : 1.75;
-    this.responsiveBrowseCamera.set(
-      0,
-      width < 760 ? 1.5 : browseCamera.y,
-      width < 760 ? 8.3 : browseCamera.z,
-    );
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, dprCap));
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.fov = width < 600 ? 33 : width < 920 ? 30 : 27;
     this.camera.updateProjectionMatrix();
+    const browseScale = width < 760 ? compactLibraryScale : 1;
+    const framedLibraryHeight =
+      (2.35 + (this.libraryRows - 1) * libraryRowSpacing) * browseScale;
+    const verticalDistance =
+      (framedLibraryHeight * 1.08) /
+      (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)));
+    const browseDistance = Math.max(width < 760 ? 9.5 : 7.1, verticalDistance);
+    this.responsiveBrowseTarget.set(
+      0,
+      this.libraryCenterY * browseScale,
+      0.1 * browseScale,
+    );
+    this.responsiveBrowseCamera.set(
+      0,
+      this.responsiveBrowseTarget.y + (width < 760 ? 0.16 : 0.2),
+      browseDistance,
+    );
     if (this.mode === "browse" && this.focusProgress < 0.01) {
       this.camera.clearViewOffset();
+      this.shelfGroup.scale.setScalar(browseScale);
       this.camera.position.copy(this.responsiveBrowseCamera);
-      this.camera.lookAt(browseTarget);
+      this.camera.lookAt(this.responsiveBrowseTarget);
     } else if (this.mode === "inspect" && this.selectedIndex !== null) {
       const worldPosition = new THREE.Vector3();
       this.runtimeBooks[this.selectedIndex].content.getWorldPosition(
@@ -1376,7 +1471,6 @@ export class ShelfEngine {
   browseTo(index: number) {
     if (this.mode !== "browse") return;
     const next = clamp(Math.round(index), 0, this.runtimeBooks.length - 1);
-    this.pendingFocusIndex = null;
     this.targetScrollIndex = next;
     this.lastInputTime = performance.now() - 1000;
   }
@@ -1387,21 +1481,12 @@ export class ShelfEngine {
     this.targetScrollIndex = next;
     this.scrollIndex = next;
     this.activeIndex = next;
-    this.pendingFocusIndex = next;
+    this.presentedIndex = next;
     this.callbacks.onActiveIndex(next);
-    if (
-      this.browseMotionPhase === "idle" &&
-      this.presentedIndex === next
-    ) {
-      this.beginFocus(next);
-    }
+    this.beginFocus(next);
   }
 
   returnToShelf() {
-    if (this.mode === "browse" && this.pendingFocusIndex !== null) {
-      this.pendingFocusIndex = null;
-      return;
-    }
     if (this.mode === "browse" || this.mode === "returning") return;
     this.controls.enabled = false;
     this.mode = "returning";
@@ -1445,8 +1530,10 @@ export class ShelfEngine {
       book.textures.forEach((texture) => texture.dispose());
     });
     this.stripeTextures.forEach((texture) => texture.dispose());
+    this.environmentTextures.forEach((texture) => texture.dispose());
     this.stripeTextureCache.clear();
     this.stripeTextures.clear();
+    this.environmentTextures.clear();
     this.stripeGeometry = null;
     this.stripeGeometrySize.set(0, 0, 0);
     this.renderer.dispose();

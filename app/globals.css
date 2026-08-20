@@ -1,15 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --paper: #eee8db;
-  --paper-deep: #e4dccd;
-  --paper-light: #f6f1e7;
-  --ink: #25231f;
-  --ink-soft: rgba(37, 35, 31, 0.62);
-  --hairline: rgba(37, 35, 31, 0.19);
-  --accent: #a74735;
+  --paper: #17110e;
+  --paper-deep: #211713;
+  --paper-light: #f3e7d2;
+  --ink: #f2e7d3;
+  --ink-soft: rgba(242, 231, 211, 0.68);
+  --hairline: rgba(209, 169, 91, 0.27);
+  --accent: #b58a3c;
+  --navy: #142437;
   --serif: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
   --sans: "Inter Variable", Inter, Helvetica, Arial, sans-serif;
+  --telugu-serif: "Noto Serif Telugu", "Nirmala UI", Gautami, Vani, serif;
+  --telugu-sans: "Noto Sans Telugu", "Nirmala UI", Gautami, Vani, sans-serif;
 }
 
 * {
@@ -45,7 +48,7 @@ button {
 button:focus-visible,
 a:focus-visible,
 canvas:focus-visible {
-  outline: 1px solid var(--ink);
+  outline: 1px solid var(--accent);
   outline-offset: 5px;
 }
 
@@ -61,7 +64,8 @@ canvas:focus-visible {
   isolation: isolate;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.28), transparent 46%),
+    radial-gradient(circle at 50% 38%, rgba(188, 132, 68, 0.1), transparent 43%),
+    linear-gradient(145deg, rgba(20, 36, 55, 0.18), transparent 34%),
     var(--paper);
 }
 
@@ -71,8 +75,8 @@ canvas:focus-visible {
   inset: 0;
   pointer-events: none;
   content: "";
-  opacity: 0.18;
-  mix-blend-mode: multiply;
+  opacity: 0.1;
+  mix-blend-mode: soft-light;
   background-image:
     radial-gradient(circle at 12% 31%, rgba(45, 35, 24, 0.12) 0 0.7px, transparent 0.8px),
     radial-gradient(circle at 73% 69%, rgba(255, 255, 255, 0.9) 0 0.6px, transparent 0.7px);
@@ -113,6 +117,51 @@ canvas:focus-visible {
   pointer-events: none;
 }
 
+.imprint-plaque {
+  position: relative;
+  min-width: 270px;
+  padding: 13px 17px 11px;
+  border: 1px solid rgba(181, 138, 60, 0.42);
+  border-radius: 2px;
+  color: var(--paper-light);
+  background:
+    linear-gradient(115deg, rgba(181, 138, 60, 0.1), transparent 44%),
+    rgba(22, 15, 12, 0.74);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 226, 168, 0.035),
+    0 12px 32px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.imprint-plaque::before,
+.imprint-plaque::after {
+  position: absolute;
+  top: 7px;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  content: "";
+  background: var(--accent);
+  opacity: 0.68;
+}
+
+.imprint-plaque::before {
+  left: 7px;
+}
+
+.imprint-plaque::after {
+  right: 7px;
+}
+
+.imprint-plaque p {
+  margin: 8px 0 0;
+  color: rgba(242, 231, 211, 0.72);
+  font-family: var(--serif);
+  font-size: 11px;
+  font-style: italic;
+  letter-spacing: 0.025em;
+}
+
 .wordmark {
   display: flex;
   gap: 13px;
@@ -126,16 +175,16 @@ canvas:focus-visible {
 .wordmark__divider {
   width: 28px;
   height: 1px;
-  background: currentColor;
-  opacity: 0.4;
+  background: var(--accent);
+  opacity: 0.72;
 }
 
 .browse-caption {
   position: absolute;
   z-index: 16;
-  bottom: clamp(178px, 23vh, 228px);
-  left: clamp(24px, 5.4vw, 92px);
-  width: min(430px, 36vw);
+  bottom: 76px;
+  left: clamp(24px, 4vw, 64px);
+  width: min(330px, 31vw);
   isolation: isolate;
   pointer-events: none;
   transition:
@@ -146,17 +195,18 @@ canvas:focus-visible {
 .browse-caption::before {
   position: absolute;
   z-index: -1;
-  top: -42px;
-  right: -72px;
-  bottom: -38px;
-  left: -92px;
+  top: -18px;
+  right: -24px;
+  bottom: -17px;
+  left: -24px;
   content: "";
-  background: linear-gradient(
-    90deg,
-    rgba(238, 232, 219, 0.96) 0%,
-    rgba(238, 232, 219, 0.82) 58%,
-    rgba(238, 232, 219, 0) 100%
-  );
+  border: 1px solid rgba(181, 138, 60, 0.2);
+  border-radius: 2px;
+  background:
+    linear-gradient(110deg, rgba(181, 138, 60, 0.08), transparent 52%),
+    rgba(18, 12, 10, 0.82);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(10px);
   pointer-events: none;
 }
 
@@ -169,7 +219,7 @@ canvas:focus-visible {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin: 0 0 17px;
+  margin: 0 0 10px;
   font-size: 9px;
   font-weight: 620;
   letter-spacing: 0.19em;
@@ -184,20 +234,36 @@ canvas:focus-visible {
 }
 
 .browse-caption h1 {
-  max-width: 420px;
+  max-width: 310px;
   margin: 0;
   font-family: var(--serif);
-  font-size: clamp(37px, 4.4vw, 72px);
+  font-size: clamp(27px, 2.5vw, 38px);
   font-weight: 430;
   letter-spacing: -0.045em;
-  line-height: 0.9;
+  line-height: 1;
+}
+
+.browse-caption h1:lang(te),
+.book-details h2:lang(te) {
+  font-family: var(--telugu-serif);
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  line-height: 1.08;
+}
+
+.browse-caption__author:lang(te),
+.book-details__author:lang(te),
+.book-details__description:lang(te),
+.book-details blockquote p:lang(te) {
+  font-family: var(--telugu-sans);
+  line-height: 1.55;
 }
 
 .browse-caption__author {
-  margin: 17px 0 0;
+  margin: 8px 0 0;
   color: var(--ink-soft);
   font-family: var(--serif);
-  font-size: 16px;
+  font-size: 13px;
   font-style: italic;
   line-height: 1.2;
 }
@@ -206,7 +272,7 @@ canvas:focus-visible {
   display: inline-flex;
   gap: 21px;
   align-items: center;
-  margin-top: 24px;
+  margin-top: 13px;
   padding: 0 0 7px;
   border-bottom: 1px solid currentColor;
   background: transparent;
@@ -238,7 +304,7 @@ canvas:focus-visible {
   place-items: center;
   border: 1px solid var(--hairline);
   border-radius: 50%;
-  background: rgba(238, 232, 219, 0.68);
+  background: rgba(23, 17, 14, 0.68);
   cursor: pointer;
   backdrop-filter: blur(10px);
   transition:
@@ -248,7 +314,8 @@ canvas:focus-visible {
 }
 
 .shelf-arrow:hover:not(:disabled) {
-  background: rgba(246, 241, 231, 0.92);
+  border-color: rgba(181, 138, 60, 0.58);
+  background: rgba(33, 23, 19, 0.94);
   transform: scale(1.06);
 }
 
@@ -345,7 +412,6 @@ canvas:focus-visible {
 
 .shelf-index__ticks {
   display: grid;
-  grid-template-columns: repeat(19, 1fr);
   align-items: end;
   height: 21px;
 }
@@ -432,7 +498,7 @@ canvas:focus-visible {
   inset: 0;
   content: "";
   background:
-    linear-gradient(90deg, rgba(238, 232, 219, 0), rgba(238, 232, 219, 0.82) 10%, var(--paper) 24%),
+    linear-gradient(90deg, rgba(23, 17, 14, 0), rgba(23, 17, 14, 0.86) 10%, var(--paper) 24%),
     var(--paper);
 }
 
@@ -447,7 +513,7 @@ canvas:focus-visible {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   height: 100%;
   padding: 27px clamp(28px, 4vw, 68px) 30px clamp(52px, 6vw, 98px);
-  border-left: 1px solid rgba(37, 35, 31, 0.08);
+  border-left: 1px solid rgba(181, 138, 60, 0.18);
 }
 
 .back-button {
@@ -772,6 +838,16 @@ canvas:focus-visible {
     padding: 20px 18px;
   }
 
+  .imprint-plaque {
+    min-width: 230px;
+    padding: 11px 13px 9px;
+  }
+
+  .imprint-plaque p {
+    margin-top: 6px;
+    font-size: 10px;
+  }
+
   .wordmark {
     gap: 9px;
     font-size: 8px;
@@ -783,34 +859,33 @@ canvas:focus-visible {
   }
 
   .browse-caption {
-    right: 0;
-    bottom: 106px;
-    left: 0;
-    width: auto;
-    padding: 52px 20px 19px;
-    background: linear-gradient(
-      180deg,
-      rgba(238, 232, 219, 0),
-      rgba(238, 232, 219, 0.96) 45px,
-      var(--paper) 64px
-    );
+    right: auto;
+    bottom: 116px;
+    left: 20px;
+    width: min(290px, calc(100vw - 40px));
+    padding: 0;
+    background: transparent;
   }
 
   .browse-caption::before {
-    display: none;
+    display: block;
+    top: -13px;
+    right: -16px;
+    bottom: -13px;
+    left: -16px;
   }
 
   .browse-caption h1 {
-    max-width: 78vw;
-    font-size: clamp(39px, 12.5vw, 58px);
+    max-width: 100%;
+    font-size: clamp(25px, 8vw, 34px);
   }
 
   .browse-caption__author {
-    font-size: 14px;
+    font-size: 12px;
   }
 
   .inspect-button {
-    margin-top: 18px;
+    margin-top: 11px;
   }
 
   .shelf-arrow {
@@ -869,7 +944,7 @@ canvas:focus-visible {
   .book-details::before {
     top: -55px;
     background:
-      linear-gradient(180deg, rgba(238, 232, 219, 0), rgba(238, 232, 219, 0.94) 54px, var(--paper) 55px),
+      linear-gradient(180deg, rgba(23, 17, 14, 0), rgba(23, 17, 14, 0.94) 54px, var(--paper) 55px),
       var(--paper);
   }
 
@@ -882,7 +957,7 @@ canvas:focus-visible {
     grid-template-columns: 1fr auto;
     grid-template-rows: auto minmax(0, 1fr) auto;
     padding: 9px 20px max(14px, env(safe-area-inset-bottom));
-    border-top: 1px solid rgba(37, 35, 31, 0.08);
+    border-top: 1px solid rgba(181, 138, 60, 0.18);
     border-left: 0;
   }
 
@@ -984,7 +1059,7 @@ canvas:focus-visible {
   }
 
   .shelf-index__ticks button {
-    min-height: 28px;
+    min-height: 32px;
   }
 }
 

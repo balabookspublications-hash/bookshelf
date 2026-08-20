@@ -76,12 +76,15 @@ export function ProgressLibrary() {
 
       <header className="site-header">
         <div
-          className="wordmark"
+          className="imprint-plaque"
           aria-label={`${siteConfig.wordmark}, ${siteConfig.collectionName}`}
         >
-          <span>{siteConfig.wordmark}</span>
-          <span className="wordmark__divider" />
-          <span>{siteConfig.collectionName}</span>
+          <div className="wordmark">
+            <span>{siteConfig.wordmark}</span>
+            <span className="wordmark__divider" />
+            <span>{siteConfig.collectionName}</span>
+          </div>
+          <p>{siteConfig.coverTagline}</p>
         </div>
       </header>
 
@@ -95,8 +98,8 @@ export function ProgressLibrary() {
           <span className="eyebrow__line" />
           <span>{String(catalog.length).padStart(2, "0")}</span>
         </p>
-        <h1>{activeBook.shortTitle}</h1>
-        <p className="browse-caption__author">{activeBook.author}</p>
+        <h1 lang="te">{activeBook.shortTitle}</h1>
+        <p className="browse-caption__author" lang="te">{activeBook.author}</p>
         <button
           type="button"
           className="inspect-button"
@@ -132,7 +135,10 @@ export function ProgressLibrary() {
       </button>
 
       <nav className="shelf-index" aria-label="Catalog position">
-        <div className="shelf-index__ticks">
+        <div
+          className="shelf-index__ticks"
+          style={{ gridTemplateColumns: `repeat(${catalog.length}, 1fr)` }}
+        >
           {catalog.map((book, index) => (
             <button
               key={book.id}
@@ -181,14 +187,14 @@ export function ProgressLibrary() {
 
             <div className="book-details__copy">
               <p className="eyebrow">{siteConfig.editionEyebrow}</p>
-              <h2>{selectedBook.title}</h2>
-              <p className="book-details__author">{selectedBook.author}</p>
-              <p className="book-details__description">
+              <h2 lang="te">{selectedBook.title}</h2>
+              <p className="book-details__author" lang="te">{selectedBook.author}</p>
+              <p className="book-details__description" lang="te">
                 {selectedBook.description}
               </p>
 
               <blockquote>
-                <p>“{selectedBook.quote}”</p>
+                <p lang="te">“{selectedBook.quote}”</p>
                 <cite>{selectedBook.quoteBy}</cite>
               </blockquote>
 

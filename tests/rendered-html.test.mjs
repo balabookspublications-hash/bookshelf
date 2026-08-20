@@ -31,32 +31,16 @@ test("server-renders the complete editorial bookshelf shell", async () => {
   const html = await response.text();
   assert.match(
     html,
-    /<title>The Complete Shelf — An Interactive 3D Library<\/title>/i,
+    /<title>Bala Books – An Interactive 3D Bookshelf<\/title>/i,
   );
   assert.match(html, /data-testid="shelf-canvas"/);
   assert.match(html, /data-testid="inspect-active"/);
-  assert.match(html, /Poor Charlie’s Almanack/);
-  assert.match(html, /Browse to High Growth Handbook/);
+  assert.match(html, /Because Some Books Must Exist/);
+  assert.match(html, /Browse to బిలం/);
   const shelfOrder = [
-    "Maintenance: Of Everything, Part One",
-    "The Dream Machine",
-    "The Scaling Era",
-    "The Art of Doing Science and Engineering",
-    "Poor Charlie’s Almanack",
-    "High Growth Handbook",
-    "The Origins of Efficiency",
-    "Scaling People",
-    "The Revolt of the Public",
-    "The Big Score",
-    "An Elegant Puzzle",
-    "Boom: Bubbles and the End of Stagnation",
-    "The Making of Prince of Persia",
-    "Where Is My Flying Car?",
-    "Pieces of the Action",
-    "Working in Public",
-    "Get Together",
-    "Scientific Freedom",
-    "Stubborn Attachments",
+    "బిలం",
+    "C/O వైఢూర్యపురం",
+    "కీకారణ్యంలో జింక",
   ];
   const renderedPositions = shelfOrder.map((title) =>
     html.indexOf(`Browse to ${title}`),
@@ -121,10 +105,13 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.ok(focusDuration >= 0.35 && focusDuration <= 0.55);
   assert.ok(returnDuration >= 0.25 && returnDuration <= 0.45);
   assert.match(engine, /easeOutCubic\(this\.focusProgress\)/);
-  assert.match(engine, /updateBrowseMotion\(delta\)/);
+  assert.match(engine, /const libraryColumns = 3/);
+  assert.match(engine, /Math\.ceil\(this\.runtimeBooks\.length \/ visibleColumns\)/);
+  assert.match(engine, /presentedBookPose\(this\.motionLayout\)/);
+  assert.match(engine, /`libraryShelf:\$\{row\}`/);
   assert.match(engine, /commitBookPose\(/);
   assert.match(engine, /bookFootprintsOverlap\(/);
-  assert.match(engine, /private motionBookIndex: number \| null/);
+  assert.doesNotMatch(engine, /motionBookIndex|updateBrowseMotion/);
   assert.doesNotMatch(engine, /const reveal = ease/);
   assert.match(engine, /frameFocusedBook\(worldPosition\)/);
   assert.match(engine, /this\.camera\.setViewOffset/);
@@ -132,9 +119,11 @@ test("keeps third-party editions optional and supports owned cover art", async (
   assert.doesNotMatch(engine, /worldPosition\.x \+ stageCenterOffset/);
   assert.match(engine, /this\.controls\.target\.copy\(this\.focusCameraTarget\)/);
   assert.match(engine, /bookInspectionIdle:/);
-  assert.match(engine, /this\.mode === "inspect" && !this\.reducedMotion/);
+  assert.match(engine, /Math\.max\(book\.hover, activeStrength\)/);
+  assert.match(engine, /emissiveIntensity = hoverStrength/);
+  assert.doesNotMatch(engine, /inspectionIdleLift|inspectionIdlePitch/);
   assert.match(styles, /\.browse-caption::before/);
-  assert.match(styles, /rgba\(238, 232, 219, 0\.96\)/);
+  assert.match(styles, /rgba\(18, 12, 10, 0\.82\)/);
   assert.doesNotMatch(
     engine,
     /focusProgress = damp\(\s*this\.focusProgress,\s*1/s,
@@ -175,33 +164,26 @@ test("restores colored foil artwork from edition coverage maps", async () => {
   );
 });
 
-test("keeps every book footprint separated throughout browse and focus routes", async () => {
+test("keeps the face-out browse row separated throughout focus routes", async () => {
   const [
     { catalog },
     {
       bookFootprintsOverlap,
-      browseMotionPose,
-      browsePhaseDuration,
       createMotionLayout,
       focusedBookPose,
       presentedBookPose,
-      shelvedBookPose,
     },
   ] = await Promise.all([
     import(new URL("../app/catalog.ts", import.meta.url)),
     import(new URL("../app/book-motion.ts", import.meta.url)),
   ]);
-  const gap = 0.045;
-  let cursor = 0;
   const books = catalog.map((book, index) => {
-    cursor += book.thickness * 0.5;
     const runtime = {
       id: book.id,
-      x: cursor,
+      x: (index - (catalog.length - 1) / 2) * 1.72,
       width: 1.31 + ((index % 5) - 2) * 0.018,
       thickness: book.thickness,
     };
-    cursor += book.thickness * 0.5 + gap;
     return runtime;
   });
   const layout = createMotionLayout(books);
@@ -236,49 +218,21 @@ test("keeps every book footprint separated throughout browse and focus routes", 
     }
   }
 
-  const outgoingPhases = [
-    "retreat-current",
-    "turn-current",
-    "shelve-current",
-  ];
-  const incomingPhases = ["extract-next", "turn-next", "settle-next"];
-
-  for (let from = 0; from < books.length; from += 1) {
-    for (let to = 0; to < books.length; to += 1) {
-      if (from === to) continue;
-      const poses = books.map(() => shelvedBookPose(layout));
-      poses[from] = presentedBookPose(layout);
-
-      for (const phase of outgoingPhases) {
-        const steps = Math.ceil(browsePhaseDuration[phase] * 240);
-        for (let step = 0; step <= steps; step += 1) {
-          poses[from] = browseMotionPose(phase, step / steps, layout);
-          assertSeparated(poses, `${from}->${to} ${phase} ${step}/${steps}`);
-        }
-      }
-
-      for (const phase of incomingPhases) {
-        const steps = Math.ceil(browsePhaseDuration[phase] * 240);
-        for (let step = 0; step <= steps; step += 1) {
-          poses[to] = browseMotionPose(phase, step / steps, layout);
-          assertSeparated(poses, `${from}->${to} ${phase} ${step}/${steps}`);
-        }
-      }
-    }
-  }
+  const browsePoses = books.map(() => presentedBookPose(layout));
+  assertSeparated(browsePoses, "face-out browse row");
 
   for (let active = 0; active < books.length; active += 1) {
     for (const focus of [
-      { x: -0.58, z: 1.66, scale: 1.08, viewport: "desktop" },
-      { x: 0, z: 1.4, scale: 0.92, viewport: "mobile" },
+      { x: -0.58, z: 1.82, scale: 1.12, viewport: "desktop" },
+      { x: 0, z: 1.52, scale: 1.06, viewport: "mobile" },
     ]) {
-      const poses = books.map(() => shelvedBookPose(layout));
-      poses[active] = presentedBookPose(layout);
+      const poses = books.map(() => presentedBookPose(layout));
+      const focusOffsetX = focus.x - books[active].x;
       for (let step = 0; step <= 120; step += 1) {
         poses[active] = focusedBookPose(
           step / 120,
           layout,
-          focus.x,
+          focusOffsetX,
           focus.z,
           focus.scale,
         );
@@ -291,7 +245,7 @@ test("keeps every book footprint separated throughout browse and focus routes", 
         poses[active] = focusedBookPose(
           step / 120,
           layout,
-          focus.x,
+          focusOffsetX,
           focus.z,
           focus.scale,
         );
