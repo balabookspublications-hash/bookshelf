@@ -1,18 +1,18 @@
 export const siteConfig = {
-  title: "The Complete Shelf — An Interactive 3D Library",
-  applicationName: "The Complete Shelf",
+  title: "Bala Books – An Interactive 3D Bookshelf",
+  applicationName: "Bala Books",
   description:
-    "Explore a tactile 3D bookshelf with procedural hardcovers and optional contributor-owned cover art.",
-  wordmark: "THE COMPLETE SHELF",
-  collectionName: "AN INTERACTIVE 3D LIBRARY",
-  editionEyebrow: "LIBRARY EDITION",
-  coverImprint: "THE COMPLETE SHELF",
-  coverTagline: "AN INTERACTIVE LIBRARY",
-  spineMark: "CS",
-  bookLinkLabel: "View book",
+    "Explore the Bala Books collection through an interactive 3D bookshelf.",
+  wordmark: "BALA BOOKS",
+  collectionName: "THE BALA BOOKSHELF",
+  editionEyebrow: "BALA BOOKS EDITION",
+  coverImprint: "BALA BOOKS",
+  coverTagline: "BECAUSE SOME BOOKS MUST EXIST",
+  spineMark: "BB",
+  bookLinkLabel: "Buy book",
   socialImageAlt:
-    "The Complete Shelf, with tactile abstract hardcovers and one book pulled forward on a walnut shelf.",
+    "The Bala Bookshelf – an interactive 3D collection of books published by Bala Books.",
   independentNote:
-    "Independent open-source project. Not affiliated with or endorsed by Stripe.",
-  siteUrl: "https://complete-shelf.vercel.app",
+    "An interactive bookshelf by Bala Books Publications.",
+  siteUrl: "https://balabooks.in",
 } as const;
