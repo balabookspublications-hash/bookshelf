@@ -61,6 +61,10 @@ export const catalog: CatalogBook[] = ([
     motif: "branches",
     height: 2.18,
     thickness: 0.26,
+    height: 2.18,
+thickness: 0.26,
+coverImage: "/books/bilam/BIlamOriginalfront.jpg",
+linkLabel: "Buy from Bala Books",
     linkLabel: "Buy from Bala Books",
   },
 
