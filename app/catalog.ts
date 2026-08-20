@@ -65,7 +65,10 @@ export const catalog: CatalogBook[] = ([
 thickness: 0.26,
 coverImage: "/books/bilam/BIlamOriginalfront.jpg",
 linkLabel: "Buy from Bala Books",
-    linkLabel: "Buy from Bala Books",
+height: 2.18,
+thickness: 0.26,
+coverImage: "/books/bilam/BIlam%20Original%20front.jpg",
+linkLabel: "Buy from Bala Books",
   },
 
   {
